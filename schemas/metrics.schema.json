@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "borrowers_total": {
+      "default": 0,
+      "title": "Borrowers Total",
+      "type": "integer"
+    },
+    "cache_hits": {
+      "default": 0,
+      "title": "Cache Hits",
+      "type": "integer"
+    },
+    "covenants_answered": {
+      "default": 0,
+      "title": "Covenants Answered",
+      "type": "integer"
+    },
+    "covenants_found": {
+      "default": 0,
+      "title": "Covenants Found",
+      "type": "integer"
+    },
+    "documents_total": {
+      "default": 0,
+      "title": "Documents Total",
+      "type": "integer"
+    },
+    "estimated_cost_usd": {
+      "default": "0",
+      "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+      "title": "Estimated Cost Usd",
+      "type": "string"
+    },
+    "invariants_failed": {
+      "default": 0,
+      "title": "Invariants Failed",
+      "type": "integer"
+    },
+    "invariants_passed": {
+      "default": 0,
+      "title": "Invariants Passed",
+      "type": "integer"
+    },
+    "live_calls": {
+      "default": 0,
+      "title": "Live Calls",
+      "type": "integer"
+    },
+    "llm_calls": {
+      "default": 0,
+      "title": "Llm Calls",
+      "type": "integer"
+    },
+    "low_confidence_evidence": {
+      "default": 0,
+      "title": "Low Confidence Evidence",
+      "type": "integer"
+    },
+    "ocr_pages": {
+      "default": 0,
+      "title": "Ocr Pages",
+      "type": "integer"
+    },
+    "pages_total": {
+      "default": 0,
+      "title": "Pages Total",
+      "type": "integer"
+    },
+    "runtime_seconds": {
+      "default": 0.0,
+      "title": "Runtime Seconds",
+      "type": "number"
+    },
+    "tokens_in": {
+      "default": 0,
+      "title": "Tokens In",
+      "type": "integer"
+    },
+    "tokens_out": {
+      "default": 0,
+      "title": "Tokens Out",
+      "type": "integer"
+    },
+    "transactions_total": {
+      "default": 0,
+      "title": "Transactions Total",
+      "type": "integer"
+    },
+    "verifier_calls": {
+      "default": 0,
+      "title": "Verifier Calls",
+      "type": "integer"
+    }
+  },
+  "title": "RunMetrics",
+  "type": "object"
+}

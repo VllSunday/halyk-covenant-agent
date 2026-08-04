@@ -1,0 +1,415 @@
+{
+  "$defs": {
+    "Aggregation": {
+      "enum": [
+        "sum",
+        "count",
+        "min",
+        "max",
+        "average",
+        "ratio",
+        "balance_end",
+        "balance_average",
+        "days_between"
+      ],
+      "title": "Aggregation",
+      "type": "string"
+    },
+    "BoundingBox": {
+      "description": "Координаты в системе PyMuPDF: начало в левом верхнем углу, единица — пункт.",
+      "properties": {
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "Comparison": {
+      "properties": {
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "operator": {
+          "$ref": "#/$defs/Operator"
+        },
+        "threshold": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Threshold",
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "operator",
+        "threshold",
+        "unit"
+      ],
+      "title": "Comparison",
+      "type": "object"
+    },
+    "EvidenceRule": {
+      "description": "Как код выбирает улику из строк расчёта. Обоснование в docs/adr/0005.",
+      "enum": [
+        "first_violation",
+        "largest_contributor",
+        "not_applicable"
+      ],
+      "title": "EvidenceRule",
+      "type": "string"
+    },
+    "Filter": {
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "negate": {
+          "default": false,
+          "title": "Negate",
+          "type": "boolean"
+        },
+        "operator": {
+          "$ref": "#/$defs/Operator"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "field",
+        "operator",
+        "value"
+      ],
+      "title": "Filter",
+      "type": "object"
+    },
+    "Operator": {
+      "enum": [
+        "ge",
+        "gt",
+        "le",
+        "lt",
+        "eq",
+        "ne"
+      ],
+      "title": "Operator",
+      "type": "string"
+    },
+    "Period": {
+      "properties": {
+        "end": {
+          "format": "date",
+          "title": "End",
+          "type": "string"
+        },
+        "end_inclusive": {
+          "default": true,
+          "title": "End Inclusive",
+          "type": "boolean"
+        },
+        "start": {
+          "format": "date",
+          "title": "Start",
+          "type": "string"
+        },
+        "start_inclusive": {
+          "default": true,
+          "title": "Start Inclusive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "Period",
+      "type": "object"
+    },
+    "Rounding": {
+      "enum": [
+        "half_up",
+        "half_even"
+      ],
+      "title": "Rounding",
+      "type": "string"
+    },
+    "RoundingSpec": {
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/Rounding",
+          "default": "half_up"
+        },
+        "scale": {
+          "default": 2,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Scale",
+          "type": "integer"
+        }
+      },
+      "title": "RoundingSpec",
+      "type": "object"
+    },
+    "Scope": {
+      "description": "Что попадает в расчёт до применения фильтров.",
+      "properties": {
+        "accounts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Accounts",
+          "type": "array"
+        },
+        "counterparties": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterparties",
+          "type": "array"
+        },
+        "currencies": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Currencies",
+          "type": "array"
+        },
+        "transaction_types": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Transaction Types",
+          "type": "array"
+        }
+      },
+      "title": "Scope",
+      "type": "object"
+    },
+    "SourceRef": {
+      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "file_hash": {
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "File Hash",
+          "type": "string"
+        },
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote"
+        }
+      },
+      "required": [
+        "file_hash",
+        "file_name",
+        "page"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "Unit": {
+      "enum": [
+        "money",
+        "ratio",
+        "percent",
+        "count",
+        "days"
+      ],
+      "title": "Unit",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Исполнимая спецификация одного ковенанта.\n\nВсё, что нужно для расчёта, лежит здесь; исполнителю не требуется ни исходный\nтекст, ни обращение к модели.",
+  "properties": {
+    "aggregation": {
+      "$ref": "#/$defs/Aggregation"
+    },
+    "borrower_id": {
+      "title": "Borrower Id",
+      "type": "string"
+    },
+    "clause_id": {
+      "title": "Clause Id",
+      "type": "string"
+    },
+    "comparison": {
+      "$ref": "#/$defs/Comparison"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "covenant_id": {
+      "title": "Covenant Id",
+      "type": "string"
+    },
+    "effective_from": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective From"
+    },
+    "effective_to": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective To"
+    },
+    "evidence_rule": {
+      "$ref": "#/$defs/EvidenceRule"
+    },
+    "exclusions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Filter"
+      },
+      "title": "Exclusions",
+      "type": "array"
+    },
+    "filters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Filter"
+      },
+      "title": "Filters",
+      "type": "array"
+    },
+    "measurement_period": {
+      "$ref": "#/$defs/Period"
+    },
+    "metric": {
+      "title": "Metric",
+      "type": "string"
+    },
+    "rounding": {
+      "$ref": "#/$defs/RoundingSpec",
+      "default": {
+        "mode": "half_up",
+        "scale": 2
+      }
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope",
+      "default": {
+        "accounts": [],
+        "counterparties": [],
+        "currencies": [],
+        "transaction_types": []
+      }
+    },
+    "source_refs": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "minItems": 1,
+      "title": "Source Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "borrower_id",
+    "covenant_id",
+    "clause_id",
+    "metric",
+    "measurement_period",
+    "aggregation",
+    "comparison",
+    "evidence_rule",
+    "source_refs",
+    "confidence"
+  ],
+  "title": "CovenantIR",
+  "type": "object"
+}

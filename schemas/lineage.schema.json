@@ -1,0 +1,294 @@
+{
+  "$defs": {
+    "BoundingBox": {
+      "description": "Координаты в системе PyMuPDF: начало в левом верхнем углу, единица — пункт.",
+      "properties": {
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "CalculationStep": {
+      "description": "Шаг расчёта в человекочитаемом виде — попадает в карточку решения.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "rows_after": {
+          "title": "Rows After",
+          "type": "integer"
+        },
+        "rows_before": {
+          "title": "Rows Before",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "description",
+        "rows_before",
+        "rows_after"
+      ],
+      "title": "CalculationStep",
+      "type": "object"
+    },
+    "InvariantCheck": {
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "passed"
+      ],
+      "title": "InvariantCheck",
+      "type": "object"
+    },
+    "SourceRef": {
+      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "file_hash": {
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "File Hash",
+          "type": "string"
+        },
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote"
+        }
+      },
+      "required": [
+        "file_hash",
+        "file_name",
+        "page"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "Verdict": {
+      "enum": [
+        "compliant",
+        "violated"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Полная цепочка от текста договора до ответа.\n\nЭто единственный источник правды для отчёта, команды explain и проверки\nинвариантов: три потребителя читают один артефакт, а не считают заново.",
+  "properties": {
+    "borrower_id": {
+      "title": "Borrower Id",
+      "type": "string"
+    },
+    "calculator": {
+      "title": "Calculator",
+      "type": "string"
+    },
+    "clause_effective_from": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clause Effective From"
+    },
+    "clause_id": {
+      "title": "Clause Id",
+      "type": "string"
+    },
+    "contributing_row_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Contributing Row Ids",
+      "type": "array"
+    },
+    "covenant_id": {
+      "title": "Covenant Id",
+      "type": "string"
+    },
+    "evidence_transaction_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evidence Transaction Id"
+    },
+    "invariants": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InvariantCheck"
+      },
+      "title": "Invariants",
+      "type": "array"
+    },
+    "ir_confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Ir Confidence",
+      "type": "number"
+    },
+    "ir_hash": {
+      "title": "Ir Hash",
+      "type": "string"
+    },
+    "measured_value": {
+      "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+      "title": "Measured Value",
+      "type": "string"
+    },
+    "notes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "operator": {
+      "title": "Operator",
+      "type": "string"
+    },
+    "recorded_at": {
+      "format": "date-time",
+      "title": "Recorded At",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_refs": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "title": "Source Refs",
+      "type": "array"
+    },
+    "steps": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CalculationStep"
+      },
+      "title": "Steps",
+      "type": "array"
+    },
+    "threshold": {
+      "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+      "title": "Threshold",
+      "type": "string"
+    },
+    "verdict": {
+      "$ref": "#/$defs/Verdict"
+    },
+    "verifier_used": {
+      "default": false,
+      "title": "Verifier Used",
+      "type": "boolean"
+    },
+    "violating_row_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Violating Row Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "recorded_at",
+    "borrower_id",
+    "covenant_id",
+    "clause_id",
+    "source_refs",
+    "ir_hash",
+    "ir_confidence",
+    "calculator",
+    "measured_value",
+    "threshold",
+    "operator",
+    "verdict"
+  ],
+  "title": "LineageRecord",
+  "type": "object"
+}

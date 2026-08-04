@@ -1,0 +1,160 @@
+{
+  "$defs": {
+    "RunMode": {
+      "description": "Режим всегда виден в команде и попадает сюда, чтобы чужой прогон читался без догадок.",
+      "enum": [
+        "solve",
+        "resume",
+        "replay"
+      ],
+      "title": "RunMode",
+      "type": "string"
+    },
+    "RunStatus": {
+      "enum": [
+        "running",
+        "completed",
+        "failed"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "dependency_lock_sha256": {
+      "title": "Dependency Lock Sha256",
+      "type": "string"
+    },
+    "finished_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Finished At"
+    },
+    "git_commit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Git Commit"
+    },
+    "git_dirty": {
+      "default": false,
+      "title": "Git Dirty",
+      "type": "boolean"
+    },
+    "halyk_version": {
+      "title": "Halyk Version",
+      "type": "string"
+    },
+    "input_name": {
+      "title": "Input Name",
+      "type": "string"
+    },
+    "input_sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "title": "Input Sha256",
+      "type": "string"
+    },
+    "max_concurrency": {
+      "title": "Max Concurrency",
+      "type": "integer"
+    },
+    "mode": {
+      "$ref": "#/$defs/RunMode"
+    },
+    "model_cache_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Cache Sha256"
+    },
+    "models": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Models",
+      "type": "object"
+    },
+    "python_version": {
+      "title": "Python Version",
+      "type": "string"
+    },
+    "replayed_from": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Replayed From"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/RunStatus",
+      "default": "running"
+    },
+    "submission_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Submission Sha256"
+    },
+    "temperature": {
+      "default": 0.0,
+      "title": "Temperature",
+      "type": "number"
+    }
+  },
+  "required": [
+    "run_id",
+    "mode",
+    "started_at",
+    "input_sha256",
+    "input_name",
+    "python_version",
+    "dependency_lock_sha256",
+    "halyk_version",
+    "models",
+    "max_concurrency"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}
