@@ -1,0 +1,40 @@
+# Внутренние заметки по задаче, в репозиторий не идут
+notes/
+CLAUDE.md
+
+# Секреты
+.env
+.env.local
+*.pem
+*.key
+
+# Данные организаторов и результаты прогонов.
+# Исключение — зафиксированный демонстрационный прогон на открытом датасете.
+data/
+artifacts/*
+!artifacts/example-run/
+!artifacts/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Инструменты
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
