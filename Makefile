@@ -1,8 +1,9 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup quality lint types schemas test solve validate demo verify-determinism docker-build docker-solve clean
+.PHONY: help setup quality lint types schemas test solve validate score demo verify-determinism docker-build docker-solve clean
 
 INPUT ?= data/dataset.zip
 OUTPUT ?= Submission.json
+DATASET ?= agentic-bank-public
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
@@ -29,8 +30,11 @@ test: ## pytest без тестов, требующих сети
 solve: ## Полный прогон: make solve INPUT=data/dataset.zip
 	uv run halyk solve --input $(INPUT) --output $(OUTPUT)
 
-validate: ## Проверить ответ по схеме
-	uv run halyk validate --submission $(OUTPUT)
+validate: ## Проверить ответ по схеме и по составу ячеек шаблона
+	uv run halyk validate --submission $(OUTPUT) --template $(DATASET)/submission_template.json
+
+score: ## Оценить ответ по ключу открытого датасета; только для разработки
+	uv run halyk score --submission $(OUTPUT) --ground-truth $(DATASET)/ground_truth.json
 
 demo: ## Прогон на зафиксированном примере, без ключей API
 	uv run halyk solve --input tests/fixtures/demo.zip --output artifacts/demo/Submission.json \

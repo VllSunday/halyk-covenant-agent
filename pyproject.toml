@@ -82,6 +82,13 @@ plugins = ["pydantic.mypy"]
 module = ["fitz.*", "mistralai.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# PyMuPDF не аннотирует конструкторы Document и Pixmap, и strict-режим спотыкается
+# на каждом обращении к ним. Послабление ограничено единственным модулем, который
+# работает с этой библиотекой напрямую.
+module = ["halyk.parsing.pdf"]
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

@@ -1,0 +1,124 @@
+"""Разбор досье KYC: кто считается связанной стороной этого заёмщика.
+
+Порог доли объявлен в тексте самого досье и у каждого заёмщика свой. Брать его
+константой нельзя: в открытом наборе встречаются значения от 20 до 40 процентов, и
+в каждом досье есть контрагент чуть ниже порога.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from decimal import Decimal
+
+_THRESHOLD = re.compile(r"владеет\s+(?P<share>\d+(?:[.,]\d+)?)\s*%\s+и\s+более", re.IGNORECASE)
+_HOLDING = re.compile(r"^(?P<name>\S[^\n]*?)\s*\n\s*(?P<share>\d+(?:[.,]\d+)?)\s*%\s*$", re.M)
+# Из текстового слоя PDF таблица приходит двумя строками на контрагента, а из OCR —
+# строкой Markdown. Это одна и та же таблица, поэтому разбираем оба начертания:
+# иначе досье, попавшее под распознавание, осталось бы без порога.
+_MARKDOWN_HOLDING = re.compile(
+    r"^\|\s*(?P<name>[^|\n]*?)\s*\|\s*(?P<share>\d+(?:[.,]\d+)?)\s*%\s*\|", re.M
+)
+_TABLE_START = "Доля голосующих прав"
+_TABLE_END = "Организации, в которых"
+
+# Второе раскрытие в тех же досье: какая часть активов дочерней организации в залоге.
+# Оно устроено так же, но отвечает на другой вопрос, поэтому разбирается отдельно.
+_COVERAGE = re.compile(
+    r"доля активов в залоге ниже\s+(?P<share>\d+(?:[.,]\d+)?)\s*%", re.IGNORECASE
+)
+_COVERAGE_START = "Доля активов в залоге"
+_COVERAGE_END = "Дочерние организации, у которых"
+
+# Юридические формы пишутся по-разному в досье и в реестре: «Aktau Holdings LLP»
+# против «Aktau Holdings L.L.P.», «Ertis Capital, LLP» с запятой.
+_PUNCTUATION = re.compile(r"[.,«»\"'()]")
+_SPACES = re.compile(r"\s+")
+
+
+class KycError(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedPartyPolicy:
+    """Правило отнесения контрагента к связанным сторонам для одного заёмщика."""
+
+    threshold: Decimal
+    holdings: tuple[tuple[str, Decimal], ...]
+
+    @property
+    def related_parties(self) -> tuple[str, ...]:
+        return tuple(name for name, share in self.holdings if share >= self.threshold)
+
+    @property
+    def near_miss(self) -> tuple[tuple[str, Decimal], ...]:
+        """Контрагенты под порогом. Держим отдельно — это заготовленные ловушки."""
+        return tuple((name, share) for name, share in self.holdings if share < self.threshold)
+
+
+@dataclass(frozen=True, slots=True)
+class CollateralPolicy:
+    """Периметр обеспечения: чьи активы в залоге и с какой доли организация в нём."""
+
+    threshold: Decimal
+    coverage: tuple[tuple[str, Decimal], ...]
+
+    @property
+    def unrestricted(self) -> tuple[tuple[str, Decimal], ...]:
+        return tuple((name, share) for name, share in self.coverage if share < self.threshold)
+
+
+def normalise_counterparty(name: str) -> str:
+    """Форма названия для сопоставления досье с реестром."""
+    return _SPACES.sub(" ", _PUNCTUATION.sub("", name)).strip().casefold()
+
+
+def _share(raw: str) -> Decimal:
+    return Decimal(raw.replace(",", ".")) / 100
+
+
+def _read_holdings(block: str) -> tuple[tuple[str, Decimal], ...]:
+    for pattern in (_HOLDING, _MARKDOWN_HOLDING):
+        found = tuple(
+            (item.group("name").strip(), _share(item.group("share")))
+            for item in pattern.finditer(block)
+        )
+        if found:
+            return found
+    return ()
+
+
+def parse_related_party_policy(text: str) -> RelatedPartyPolicy:
+    match = _THRESHOLD.search(text)
+    if match is None:
+        raise KycError("В досье не объявлен порог доли для связанных сторон")
+
+    start = text.find(_TABLE_START)
+    end = text.find(_TABLE_END, start if start >= 0 else 0)
+    if start < 0 or end < 0:
+        raise KycError("В досье не нашлась таблица долей участия")
+
+    block = text[start + len(_TABLE_START) : end]
+    holdings = _read_holdings(block)
+    if not holdings:
+        raise KycError("Таблица долей участия пуста")
+
+    return RelatedPartyPolicy(threshold=_share(match.group("share")), holdings=holdings)
+
+
+def parse_collateral_policy(text: str) -> CollateralPolicy:
+    """Разбор таблицы обеспечительного покрытия. Есть не в каждом досье."""
+    match = _COVERAGE.search(text)
+    if match is None:
+        raise KycError("В досье не объявлена граница периметра обеспечения")
+
+    start = text.find(_COVERAGE_START)
+    end = text.find(_COVERAGE_END, start if start >= 0 else 0)
+    if start < 0 or end < 0:
+        raise KycError("В досье не нашлась таблица обеспечительного покрытия")
+
+    coverage = _read_holdings(text[start + len(_COVERAGE_START) : end])
+    if not coverage:
+        raise KycError("Таблица обеспечительного покрытия пуста")
+    return CollateralPolicy(threshold=_share(match.group("share")), coverage=coverage)

@@ -78,6 +78,30 @@
       "title": "Comparison",
       "type": "object"
     },
+    "DocumentKind": {
+      "description": "Тип документа. Определяется по содержимому: имена файлов обезличены.",
+      "enum": [
+        "loan_agreement",
+        "audit_procedures",
+        "financial_notes",
+        "kyc_file",
+        "treasury_memo",
+        "unrelated"
+      ],
+      "title": "DocumentKind",
+      "type": "string"
+    },
+    "DocumentStatus": {
+      "description": "Действует ли документ и является ли он окончательным.\n\nДве оси уложены в одну шкалу намеренно: у договора значимо, не заменён ли он\nновой редакцией, у аудиторского отчёта — не является ли он черновиком. Обе\nотвечают на один вопрос — можно ли на документ опираться.",
+      "enum": [
+        "current",
+        "superseded",
+        "draft",
+        "final"
+      ],
+      "title": "DocumentStatus",
+      "type": "string"
+    },
     "EvidenceRule": {
       "description": "Как код выбирает улику из строк расчёта. Обоснование в docs/adr/0005.",
       "enum": [
@@ -232,9 +256,35 @@
       "title": "Scope",
       "type": "object"
     },
+    "SourceAuthority": {
+      "description": "Можно ли опираться на документ при расчёте.\n\nПромежуточная ведомость аудитора и заменённая редакция договора читаются и\nхранятся, но менять по ним ответ нельзя. Разделение статуса документа и права\nна него опираться нужно потому, что второе зависит не только от самого\nдокумента: черновик перестаёт действовать, когда у того же заёмщика появился\nокончательный отчёт.",
+      "enum": [
+        "authoritative",
+        "recorded",
+        "ignored"
+      ],
+      "title": "SourceAuthority",
+      "type": "string"
+    },
     "SourceRef": {
-      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения.",
+      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения. Тип, статус и номер заключения носятся вместе с\nадресом: без них нельзя ответить, почему один вывод применён, а другой отклонён.",
       "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "authority": {
+          "$ref": "#/$defs/SourceAuthority",
+          "default": "recorded"
+        },
         "bbox": {
           "anyOf": [
             {
@@ -256,6 +306,10 @@
           "title": "File Name",
           "type": "string"
         },
+        "kind": {
+          "$ref": "#/$defs/DocumentKind",
+          "default": "unrelated"
+        },
         "page": {
           "minimum": 1,
           "title": "Page",
@@ -272,6 +326,22 @@
           ],
           "default": null,
           "title": "Quote"
+        },
+        "report_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Report Number"
+        },
+        "status": {
+          "$ref": "#/$defs/DocumentStatus",
+          "default": "current"
         }
       },
       "required": [

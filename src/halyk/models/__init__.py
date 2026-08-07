@@ -15,6 +15,7 @@ from halyk.models.manifest import RunManifest, RunMode, RunStatus
 from halyk.models.metrics import RunMetrics
 from halyk.models.result import CalculationResult, CalculationStep, CovenantAnswer, Verdict
 from halyk.models.source import BoundingBox, SourceRef
+from halyk.models.submission import CovenantCell, Submission
 
 __all__ = [
     "Aggregation",
@@ -23,6 +24,7 @@ __all__ = [
     "CalculationStep",
     "Comparison",
     "CovenantAnswer",
+    "CovenantCell",
     "CovenantIR",
     "EvidenceRule",
     "Filter",
@@ -37,6 +39,7 @@ __all__ = [
     "RunStatus",
     "Scope",
     "SourceRef",
+    "Submission",
     "Unit",
     "Verdict",
 ]

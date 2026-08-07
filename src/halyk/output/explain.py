@@ -70,7 +70,7 @@ def _calculation(record: LineageRecord) -> RenderableType:
 
 def _conclusion(record: LineageRecord) -> RenderableType:
     sign = _OPERATOR_SIGNS.get(record.operator, record.operator)
-    violated = record.verdict is Verdict.VIOLATED
+    violated = record.verdict is Verdict.BREACH
     body = Text.assemble(
         (f"{record.measured_value} ", "bold"),
         (f"{sign} {record.threshold}\n", "dim"),

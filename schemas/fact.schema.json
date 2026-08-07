@@ -1,0 +1,444 @@
+{
+  "$defs": {
+    "AggregateObligationFact": {
+      "description": "Обязательство, раскрытое в примечаниях и не отражённое отдельной операцией.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "const": "aggregate_obligation",
+          "default": "aggregate_obligation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "description",
+        "amount"
+      ],
+      "title": "AggregateObligationFact",
+      "type": "object"
+    },
+    "BoundingBox": {
+      "description": "Координаты в системе PyMuPDF: начало в левом верхнем углу, единица — пункт.",
+      "properties": {
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "CollateralCoverageFact": {
+      "description": "Доля активов дочерних организаций в залоге и граница периметра обеспечения.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "collateral_coverage",
+          "default": "collateral_coverage",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "subsidiaries": {
+          "items": {
+            "$ref": "#/$defs/Share"
+          },
+          "title": "Subsidiaries",
+          "type": "array"
+        },
+        "threshold": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Threshold",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "threshold",
+        "subsidiaries"
+      ],
+      "title": "CollateralCoverageFact",
+      "type": "object"
+    },
+    "Currency": {
+      "enum": [
+        "USD",
+        "EUR",
+        "KZT"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
+    "DocumentKind": {
+      "description": "Тип документа. Определяется по содержимому: имена файлов обезличены.",
+      "enum": [
+        "loan_agreement",
+        "audit_procedures",
+        "financial_notes",
+        "kyc_file",
+        "treasury_memo",
+        "unrelated"
+      ],
+      "title": "DocumentKind",
+      "type": "string"
+    },
+    "DocumentStatus": {
+      "description": "Действует ли документ и является ли он окончательным.\n\nДве оси уложены в одну шкалу намеренно: у договора значимо, не заменён ли он\nновой редакцией, у аудиторского отчёта — не является ли он черновиком. Обе\nотвечают на один вопрос — можно ли на документ опираться.",
+      "enum": [
+        "current",
+        "superseded",
+        "draft",
+        "final"
+      ],
+      "title": "DocumentStatus",
+      "type": "string"
+    },
+    "FxSettlementFact": {
+      "description": "Пара «счёт — платёж», по которой восстанавливается курс пересчёта.\n\nОтдельной таблицы курсов в датасете нет: примечания раскрывают конкретный\nрасчёт, и курс выводится из него. Хранить нужно обе суммы, а не только\nотношение, иначе в объяснении ответа неоткуда взять исходные числа.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "counterparty": {
+          "title": "Counterparty",
+          "type": "string"
+        },
+        "invoiced": {
+          "$ref": "#/$defs/Money"
+        },
+        "kind": {
+          "const": "fx_settlement",
+          "default": "fx_settlement",
+          "title": "Kind",
+          "type": "string"
+        },
+        "settled": {
+          "$ref": "#/$defs/Money"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "counterparty",
+        "invoiced",
+        "settled"
+      ],
+      "title": "FxSettlementFact",
+      "type": "object"
+    },
+    "Money": {
+      "description": "Сумма в минорных единицах вместе со своей валютой.\n\nВалюта носится с суммой, а не подразумевается снаружи: в реестре соседствуют USD\nи EUR, и сложение их без пересчёта — ошибка, которую нужно ловить типом, а не\nревью.",
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "minor": {
+          "title": "Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "currency",
+        "minor"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "OneOffItemFact": {
+      "description": "Разовая статья из примечаний. К EBITDA прибавляется не всякая — см. порог.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "counterparty": {
+          "title": "Counterparty",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "const": "one_off_item",
+          "default": "one_off_item",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "description",
+        "counterparty",
+        "amount"
+      ],
+      "title": "OneOffItemFact",
+      "type": "object"
+    },
+    "OneOffPolicyFact": {
+      "description": "Минимальная сумма, с которой статья считается разовой.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "one_off_policy",
+          "default": "one_off_policy",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minimum": {
+          "$ref": "#/$defs/Money"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "minimum"
+      ],
+      "title": "OneOffPolicyFact",
+      "type": "object"
+    },
+    "RelatedPartyPolicyFact": {
+      "description": "Порог отнесения к связанным сторонам и доли из досье KYC.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "holdings": {
+          "items": {
+            "$ref": "#/$defs/Share"
+          },
+          "title": "Holdings",
+          "type": "array"
+        },
+        "kind": {
+          "const": "related_party_policy",
+          "default": "related_party_policy",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "threshold": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Threshold",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "threshold",
+        "holdings"
+      ],
+      "title": "RelatedPartyPolicyFact",
+      "type": "object"
+    },
+    "Share": {
+      "description": "Доля контрагента: голосующие права или активы в залоге.",
+      "properties": {
+        "counterparty": {
+          "title": "Counterparty",
+          "type": "string"
+        },
+        "share": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Share",
+          "type": "string"
+        }
+      },
+      "required": [
+        "counterparty",
+        "share"
+      ],
+      "title": "Share",
+      "type": "object"
+    },
+    "SourceAuthority": {
+      "description": "Можно ли опираться на документ при расчёте.\n\nПромежуточная ведомость аудитора и заменённая редакция договора читаются и\nхранятся, но менять по ним ответ нельзя. Разделение статуса документа и права\nна него опираться нужно потому, что второе зависит не только от самого\nдокумента: черновик перестаёт действовать, когда у того же заёмщика появился\nокончательный отчёт.",
+      "enum": [
+        "authoritative",
+        "recorded",
+        "ignored"
+      ],
+      "title": "SourceAuthority",
+      "type": "string"
+    },
+    "SourceRef": {
+      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения. Тип, статус и номер заключения носятся вместе с\nадресом: без них нельзя ответить, почему один вывод применён, а другой отклонён.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "authority": {
+          "$ref": "#/$defs/SourceAuthority",
+          "default": "recorded"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "file_hash": {
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "File Hash",
+          "type": "string"
+        },
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DocumentKind",
+          "default": "unrelated"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote"
+        },
+        "report_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Report Number"
+        },
+        "status": {
+          "$ref": "#/$defs/DocumentStatus",
+          "default": "current"
+        }
+      },
+      "required": [
+        "file_hash",
+        "file_name",
+        "page"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "aggregate_obligation": "#/$defs/AggregateObligationFact",
+      "collateral_coverage": "#/$defs/CollateralCoverageFact",
+      "fx_settlement": "#/$defs/FxSettlementFact",
+      "one_off_item": "#/$defs/OneOffItemFact",
+      "one_off_policy": "#/$defs/OneOffPolicyFact",
+      "related_party_policy": "#/$defs/RelatedPartyPolicyFact"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RelatedPartyPolicyFact"
+    },
+    {
+      "$ref": "#/$defs/CollateralCoverageFact"
+    },
+    {
+      "$ref": "#/$defs/OneOffItemFact"
+    },
+    {
+      "$ref": "#/$defs/OneOffPolicyFact"
+    },
+    {
+      "$ref": "#/$defs/AggregateObligationFact"
+    },
+    {
+      "$ref": "#/$defs/FxSettlementFact"
+    }
+  ]
+}

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+DEFAULT_MODEL = "gpt-5.6-sol"
+
 
 class ConfigError(RuntimeError):
     pass
@@ -13,9 +15,18 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
+    """Настройки одного вызова модели.
+
+    Параметров семплирования здесь нет намеренно: у рассуждающих моделей их либо не
+    принимают, либо они ни на что не влияют, а воспроизводимость прогона держится на
+    кэше по содержимому запроса, а не на `temperature=0`.
+    """
+
     name: str
     api_key: str | None
-    temperature: float = 0.0
+    reasoning_effort: str = "medium"
+    timeout_seconds: float = 90.0
+    max_retries: int = 2
 
     def require_key(self) -> str:
         if not self.api_key:
@@ -37,21 +48,29 @@ class Settings:
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
         load_dotenv(env_file, override=False)
+        api_key = os.getenv("OPENAI_API_KEY")
         return cls(
+            # Компиляция ковенанта — самый дорогой по последствиям шаг: ошибка здесь
+            # ломает все три ячейки заёмщика сразу, поэтому уровень рассуждения выше.
             compiler=ModelConfig(
-                name=os.getenv("HALYK_COMPILER_MODEL", "gpt-5.6-sol"),
-                api_key=os.getenv("OPENAI_API_KEY"),
+                name=os.getenv("HALYK_COMPILER_MODEL", DEFAULT_MODEL),
+                api_key=api_key,
+                reasoning_effort=os.getenv("HALYK_COMPILER_EFFORT", "high"),
             ),
+            # Распознавание — задача восприятия, а не рассуждения; высокий уровень
+            # только замедляет её, не добавляя точности.
             ocr=ModelConfig(
-                name=os.getenv("HALYK_OCR_MODEL", "mistral-ocr-latest"),
-                api_key=os.getenv("MISTRAL_API_KEY"),
+                name=os.getenv("HALYK_OCR_MODEL", DEFAULT_MODEL),
+                api_key=api_key,
+                reasoning_effort=os.getenv("HALYK_OCR_EFFORT", "low"),
             ),
             verifier=ModelConfig(
-                name=os.getenv("HALYK_VERIFIER_MODEL", "claude-sonnet-5"),
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
+                name=os.getenv("HALYK_VERIFIER_MODEL", DEFAULT_MODEL),
+                api_key=api_key,
+                reasoning_effort=os.getenv("HALYK_VERIFIER_EFFORT", "xhigh"),
             ),
             artifacts_dir=Path(os.getenv("HALYK_ARTIFACTS_DIR", "artifacts")),
-            max_concurrency=int(os.getenv("HALYK_MAX_CONCURRENCY", "8")),
+            max_concurrency=int(os.getenv("HALYK_MAX_CONCURRENCY", "4")),
         )
 
     def model_versions(self) -> dict[str, str]:

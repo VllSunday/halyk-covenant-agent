@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "Currency": {
+      "enum": [
+        "USD",
+        "EUR",
+        "KZT"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
+    "LedgerRow": {
+      "description": "Одна операция реестра.\n\n`amount` необязателен: в выгрузке встречаются строки с пустой суммой, и это не\nпорча данных, а часть задачи — фактическая сумма раскрыта в другом документе.\nПодставлять сюда ноль нельзя, иначе разница между «нет данных» и «нулевой\nоборот» потеряется.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "counterparty": {
+          "title": "Counterparty",
+          "type": "string"
+        },
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "txn_id": {
+          "title": "Txn Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "txn_id",
+        "date",
+        "account_id",
+        "counterparty",
+        "description"
+      ],
+      "title": "LedgerRow",
+      "type": "object"
+    },
+    "Money": {
+      "description": "Сумма в минорных единицах вместе со своей валютой.\n\nВалюта носится с суммой, а не подразумевается снаружи: в реестре соседствуют USD\nи EUR, и сложение их без пересчёта — ошибка, которую нужно ловить типом, а не\nревью.",
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "minor": {
+          "title": "Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "currency",
+        "minor"
+      ],
+      "title": "Money",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Операция в том виде, в котором её увидит расчёт.\n\nРядом лежит исходная строка: сравнение «было — стало» не требует второго\nисточника, а список применённых корректировок объясняет каждое расхождение.",
+  "properties": {
+    "adjustments": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Adjustments",
+      "type": "array"
+    },
+    "amount": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Money"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "covenant_category": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Covenant Category"
+    },
+    "effective_date": {
+      "format": "date",
+      "title": "Effective Date",
+      "type": "string"
+    },
+    "excluded": {
+      "default": false,
+      "title": "Excluded",
+      "type": "boolean"
+    },
+    "in_period": {
+      "default": true,
+      "title": "In Period",
+      "type": "boolean"
+    },
+    "row": {
+      "$ref": "#/$defs/LedgerRow"
+    }
+  },
+  "required": [
+    "row",
+    "amount",
+    "effective_date"
+  ],
+  "title": "NormalisedTransaction",
+  "type": "object"
+}

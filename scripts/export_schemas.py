@@ -9,24 +9,38 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
+from halyk.models.adjustment import AdjustmentAdapter, NormalisedTransaction
 from halyk.models.covenant import CovenantIR
+from halyk.models.fact import FactAdapter
 from halyk.models.lineage import LineageRecord
 from halyk.models.manifest import RunManifest
 from halyk.models.metrics import RunMetrics
+from halyk.models.submission import Submission
 
-EXPORTED: dict[str, type[BaseModel]] = {
+# Размеченные объединения выгружаются через TypeAdapter: схема одной ветки не
+# описала бы артефакт, в котором лежат все.
+EXPORTED: dict[str, type[BaseModel] | TypeAdapter[Any]] = {
+    "adjustment": AdjustmentAdapter,
     "covenant_ir": CovenantIR,
+    "fact": FactAdapter,
     "lineage": LineageRecord,
+    "normalised_transaction": NormalisedTransaction,
     "run_manifest": RunManifest,
     "metrics": RunMetrics,
+    "submission": Submission,
 }
 
 
-def render(model: type[BaseModel]) -> str:
-    schema = model.model_json_schema(mode="serialization")
+def render(model: type[BaseModel] | TypeAdapter[Any]) -> str:
+    schema = (
+        model.json_schema(mode="serialization")
+        if isinstance(model, TypeAdapter)
+        else model.model_json_schema(mode="serialization")
+    )
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     return json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 

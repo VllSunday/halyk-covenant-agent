@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "CovenantCell": {
+      "additionalProperties": false,
+      "description": "Ячейка ответа: вердикт, число и улика.\n\n`actual` неотрицателен по условию задачи — в реестре расходы записаны со знаком\nминус, и потерянный `abs` иначе уезжает прямо в ответ.\n\n`evidence_txn_id` обязателен и при пустой улике: `null` — это значение, а не\nоснование выкинуть ключ из ячейки.",
+      "properties": {
+        "actual": {
+          "minimum": 0,
+          "title": "Actual",
+          "type": "number"
+        },
+        "evidence_txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Evidence Txn Id"
+        },
+        "status": {
+          "$ref": "#/$defs/Verdict"
+        }
+      },
+      "required": [
+        "status",
+        "actual",
+        "evidence_txn_id"
+      ],
+      "title": "CovenantCell",
+      "type": "object"
+    },
+    "Verdict": {
+      "description": "Значения ровно те, что принимает ключ: любой иной регистр обнуляет ячейку.",
+      "enum": [
+        "COMPLIANT",
+        "BREACH"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Файл ответа целиком.\n\nКлючи `answers` не перечислены в модели: их состав диктует шаблон организаторов,\nи сверяется он с ним же, а не с нашим представлением о наборе заёмщиков.\n\nПосторонние поля запрещены: это внешний контракт, и молча проглоченный лишний\nключ означал бы, что мы отправили не тот документ, который проверяли.",
+  "properties": {
+    "answers": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "$ref": "#/$defs/CovenantCell"
+        },
+        "type": "object"
+      },
+      "title": "Answers",
+      "type": "object"
+    },
+    "contact_email": {
+      "title": "Contact Email",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "team": {
+      "title": "Team",
+      "type": "string"
+    }
+  },
+  "required": [
+    "team",
+    "contact_email",
+    "model",
+    "answers"
+  ],
+  "title": "Submission",
+  "type": "object"
+}

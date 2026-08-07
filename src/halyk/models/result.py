@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Verdict(StrEnum):
-    COMPLIANT = "compliant"
-    VIOLATED = "violated"
+    """Значения ровно те, что принимает ключ: любой иной регистр обнуляет ячейку."""
+
+    COMPLIANT = "COMPLIANT"
+    BREACH = "BREACH"
 
 
 class CalculationStep(BaseModel):

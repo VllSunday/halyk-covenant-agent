@@ -1,0 +1,661 @@
+{
+  "$defs": {
+    "AdjustmentStatus": {
+      "description": "Судьба корректировки.\n\nОтклонённое и неприменённое хранится наравне с применённым: половина ловушек\nдатасета в том, что документ рассматривает вопрос и оставляет всё как было, и\nотличить «не нашли» от «нашли и отказали» нужно в отчёте, а не в голове.",
+      "enum": [
+        "pending",
+        "applied",
+        "rejected",
+        "superseded",
+        "unconfirmed",
+        "unmatched",
+        "ambiguous",
+        "conflicting",
+        "ineffective",
+        "corroborated"
+      ],
+      "title": "AdjustmentStatus",
+      "type": "string"
+    },
+    "BoundingBox": {
+      "description": "Координаты в системе PyMuPDF: начало в левом верхнем углу, единица — пункт.",
+      "properties": {
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "ConvertCurrencyAdjustment": {
+      "description": "Пересчёт по курсу, раскрытому в примечаниях.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "convert_currency",
+          "default": "convert_currency",
+          "title": "Action",
+          "type": "string"
+        },
+        "from_currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "rate": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Rate",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "pending"
+        },
+        "to_currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source",
+        "rate",
+        "from_currency",
+        "to_currency"
+      ],
+      "title": "ConvertCurrencyAdjustment",
+      "type": "object"
+    },
+    "Currency": {
+      "enum": [
+        "USD",
+        "EUR",
+        "KZT"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
+    "DocumentKind": {
+      "description": "Тип документа. Определяется по содержимому: имена файлов обезличены.",
+      "enum": [
+        "loan_agreement",
+        "audit_procedures",
+        "financial_notes",
+        "kyc_file",
+        "treasury_memo",
+        "unrelated"
+      ],
+      "title": "DocumentKind",
+      "type": "string"
+    },
+    "DocumentStatus": {
+      "description": "Действует ли документ и является ли он окончательным.\n\nДве оси уложены в одну шкалу намеренно: у договора значимо, не заменён ли он\nновой редакцией, у аудиторского отчёта — не является ли он черновиком. Обе\nотвечают на один вопрос — можно ли на документ опираться.",
+      "enum": [
+        "current",
+        "superseded",
+        "draft",
+        "final"
+      ],
+      "title": "DocumentStatus",
+      "type": "string"
+    },
+    "ExcludeAdjustment": {
+      "description": "Операция не относится к ковенантному периоду.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "exclude",
+          "default": "exclude",
+          "title": "Action",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "pending"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source"
+      ],
+      "title": "ExcludeAdjustment",
+      "type": "object"
+    },
+    "Money": {
+      "description": "Сумма в минорных единицах вместе со своей валютой.\n\nВалюта носится с суммой, а не подразумевается снаружи: в реестре соседствуют USD\nи EUR, и сложение их без пересчёта — ошибка, которую нужно ловить типом, а не\nревью.",
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "minor": {
+          "title": "Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "currency",
+        "minor"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "ReclassifyAdjustment": {
+      "description": "Операция отнесена к другой статье для целей ковенантов.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "reclassify",
+          "default": "reclassify",
+          "title": "Action",
+          "type": "string"
+        },
+        "new_value": {
+          "minLength": 1,
+          "title": "New Value",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "old_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Value"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "pending"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source",
+        "new_value"
+      ],
+      "title": "ReclassifyAdjustment",
+      "type": "object"
+    },
+    "ReviewNoChangeAdjustment": {
+      "description": "Вопрос рассмотрен, первоначальная классификация сохранена.\n\nИзменения здесь нет по определению, и всё же это запись в том же потоке:\nдатасет намеренно подсовывает рассмотренные и отклонённые переклассификации, и\nотличить «мы не заметили» от «документ отказал» можно только по такой отметке.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "review_no_change",
+          "default": "review_no_change",
+          "title": "Action",
+          "type": "string"
+        },
+        "considered": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Considered"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "old_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Value"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "rejected"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source"
+      ],
+      "title": "ReviewNoChangeAdjustment",
+      "type": "object"
+    },
+    "SetEffectiveDateAdjustment": {
+      "description": "Период определяется датой оказания услуг, а не датой счёта-фактуры.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "set_effective_date",
+          "default": "set_effective_date",
+          "title": "Action",
+          "type": "string"
+        },
+        "effective_date": {
+          "format": "date",
+          "title": "Effective Date",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "pending"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source",
+        "effective_date"
+      ],
+      "title": "SetEffectiveDateAdjustment",
+      "type": "object"
+    },
+    "SetMissingAmountAdjustment": {
+      "description": "Сумма, не попавшая в выгрузку, раскрыта документом.\n\nИменно не попавшая: заполнять можно только пустое место. Строка с суммой —\nсвидетельство, и подменять её числом из примечаний нельзя, даже если числа\nрасходятся; такое расхождение разбирают, а не затирают.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "set_missing_amount",
+          "default": "set_missing_amount",
+          "title": "Action",
+          "type": "string"
+        },
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "pending"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source",
+        "amount"
+      ],
+      "title": "SetMissingAmountAdjustment",
+      "type": "object"
+    },
+    "SourceAuthority": {
+      "description": "Можно ли опираться на документ при расчёте.\n\nПромежуточная ведомость аудитора и заменённая редакция договора читаются и\nхранятся, но менять по ним ответ нельзя. Разделение статуса документа и права\nна него опираться нужно потому, что второе зависит не только от самого\nдокумента: черновик перестаёт действовать, когда у того же заёмщика появился\nокончательный отчёт.",
+      "enum": [
+        "authoritative",
+        "recorded",
+        "ignored"
+      ],
+      "title": "SourceAuthority",
+      "type": "string"
+    },
+    "SourceRef": {
+      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения. Тип, статус и номер заключения носятся вместе с\nадресом: без них нельзя ответить, почему один вывод применён, а другой отклонён.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "authority": {
+          "$ref": "#/$defs/SourceAuthority",
+          "default": "recorded"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "file_hash": {
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "File Hash",
+          "type": "string"
+        },
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DocumentKind",
+          "default": "unrelated"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote"
+        },
+        "report_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Report Number"
+        },
+        "status": {
+          "$ref": "#/$defs/DocumentStatus",
+          "default": "current"
+        }
+      },
+      "required": [
+        "file_hash",
+        "file_name",
+        "page"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "TransactionSelector": {
+      "description": "Как документ указывает на операцию.\n\nИдентификатор есть не всегда: окончательный отчёт аудитора называет сумму и\nконтрагента, но не номер проводки. Поэтому отбор описан явно и допускает оба\nспособа, а результат сопоставления фиксируется отдельным статусом.",
+      "properties": {
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "counterparty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Counterparty"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "title": "TransactionSelector",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "convert_currency": "#/$defs/ConvertCurrencyAdjustment",
+      "exclude": "#/$defs/ExcludeAdjustment",
+      "reclassify": "#/$defs/ReclassifyAdjustment",
+      "review_no_change": "#/$defs/ReviewNoChangeAdjustment",
+      "set_effective_date": "#/$defs/SetEffectiveDateAdjustment",
+      "set_missing_amount": "#/$defs/SetMissingAmountAdjustment"
+    },
+    "propertyName": "action"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ReclassifyAdjustment"
+    },
+    {
+      "$ref": "#/$defs/SetMissingAmountAdjustment"
+    },
+    {
+      "$ref": "#/$defs/ExcludeAdjustment"
+    },
+    {
+      "$ref": "#/$defs/SetEffectiveDateAdjustment"
+    },
+    {
+      "$ref": "#/$defs/ConvertCurrencyAdjustment"
+    },
+    {
+      "$ref": "#/$defs/ReviewNoChangeAdjustment"
+    }
+  ]
+}
