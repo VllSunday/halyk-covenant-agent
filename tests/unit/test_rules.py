@@ -22,8 +22,8 @@ def category(description: str, minor: int) -> C | None:
         ("Office rent", C.RENT),
         ("Property insurance premium", C.INSURANCE_PREMIUM),
         ("Equipment purchase for the kiln", C.CAPEX),
-        ("Customer newsletter marketing production", C.OPEX),
-        ("Management advisory retainer", C.OPEX),
+        ("Plant operating and maintenance expenses", C.OPEX),
+        ("Kiln servicing and operating costs 2025", C.OPEX),
     ],
 )
 def test_outflows_are_recognised(description: str, expected: C) -> None:
@@ -54,7 +54,7 @@ def test_inflows_are_recognised(description: str, expected: C) -> None:
         ("Group insurance experience refund", C.INSURANCE_PREMIUM),
         ("Payroll overfunding returned", C.PAYROLL),
         ("Telecom service credit received", C.UTILITIES),
-        ("Marketing overbilling refund", C.OPEX),
+        ("Marketing overbilling refund", C.OTHER),
     ],
 )
 def test_returns_keep_the_article_of_the_original_expense(description: str, expected: C) -> None:
@@ -72,8 +72,28 @@ def test_the_same_word_gives_different_articles_by_direction() -> None:
     assert category("Interest income on treasury bills", 100_00) is C.OTHER
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Customer newsletter marketing production",
+        "Management advisory retainer",
+        "Outdoor marketing site hire",
+        "Industry exhibition stand marketing",
+        "Statutory audit fee 2025",
+    ],
+)
+def test_administrative_costs_are_not_operating_expenses(description: str) -> None:
+    """Строка «операционные расходы» договора — про эксплуатацию объекта.
+
+    Маркетинг, реклама и консультации операционные по смыслу, но в эту строку
+    отчётности не входят: у B1 она состоит из одной проводки на шесть миллионов, а
+    рекламы там на двадцать.
+    """
+    assert category(description, -100_00) is C.OTHER
+
+
 def test_unknown_description_is_left_to_the_model() -> None:
-    assert classify_by_rules("Berth silt cleaning and clearance works", -100_00) is not None
+    assert classify_by_rules("Berth silt cleaning and clearance works", -100_00) is None
     assert classify_by_rules("Zhaiyk dredging arrangement", -100_00) is None
 
 

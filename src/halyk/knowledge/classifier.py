@@ -96,7 +96,7 @@ def _document_category(transaction: NormalisedTransaction) -> TransactionCategor
         "налоги": TransactionCategory.TAXES,
         "страховые премии": TransactionCategory.INSURANCE_PREMIUM,
         "капитальные затраты": TransactionCategory.CAPEX,
-        "консультационные услуги": TransactionCategory.OPEX,
+        "консультационные услуги": TransactionCategory.OTHER,
         "выручка": TransactionCategory.REVENUE,
     }
     for phrase, category in known.items():

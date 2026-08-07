@@ -101,7 +101,7 @@ def test_document_conclusion_wins_over_both_votes(tmp_path: Path) -> None:
     assert record.decision_source is DecisionSource.DOCUMENT
     # Голоса сохраняются: по ним видно, что именно перекрыл документ.
     assert record.model_category is C.OPEX
-    assert record.rule_category is C.OPEX
+    assert record.rule_category is C.OTHER
 
 
 def test_agreement_of_rule_and_model_is_accepted(tmp_path: Path) -> None:

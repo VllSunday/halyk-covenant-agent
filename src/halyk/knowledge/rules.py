@@ -76,7 +76,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         "contra-marketing",
-        TransactionCategory.OPEX,
+        TransactionCategory.OTHER,
         rf"(marketing|ad campaign|media).*{_CONTRA}",
         Direction.INFLOW,
     ),
@@ -139,7 +139,7 @@ RULES: tuple[Rule, ...] = (
     _rule(
         "capex",
         TransactionCategory.CAPEX,
-        r"capital (expenditure|asset|work)|capitalised|equipment purchase|"
+        r"capital (expenditure|asset|work)|equipment purchase|purchase of .*equipment|"
         r"construction|machinery|plant acquisition|fit-out|transfer of .*equipment",
         Direction.OUTFLOW,
     ),
@@ -150,14 +150,23 @@ RULES: tuple[Rule, ...] = (
         r"service income|freight income|throughput",
         Direction.INFLOW,
     ),
-    # Всё остальное операционное. Идёт последним: слово «servicing» встречается и в
-    # ремонте оборудования, и в обслуживании кредита.
+    # Административное и сбытовое: в строку операционных расходов отчётности оно не
+    # входит. Проверяется раньше, чем сами операционные расходы: «outdoor marketing
+    # site hire» и «marketing translation» не должны попасть в них по слову рядом.
+    _rule(
+        "administrative",
+        TransactionCategory.OTHER,
+        r"marketing|ad campaign|advertis|sponsor|exhibition|brand|newsletter|media buy|"
+        r"advisory|consult|retainer|audit fee|legal",
+        Direction.OUTFLOW,
+    ),
+    # Собственно операционные расходы: эксплуатация, обслуживание и содержание
+    # объекта. У заёмщика таких строк одна-две на весь год, и именно они образуют
+    # статью, из которой считается EBITDA.
     _rule(
         "opex",
         TransactionCategory.OPEX,
-        r"marketing|ad campaign|advertis|sponsor|exhibition|brand|newsletter|media buy|"
-        r"advisory|consult|retainer|audit fee|legal|servicing|maintenance|operating costs|"
-        r"cleaning|inspection|survey",
+        r"operating (costs|and maintenance)|servicing|maintenance",
         Direction.OUTFLOW,
     ),
 )
