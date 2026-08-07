@@ -9,6 +9,7 @@ from pathlib import Path
 from halyk import __version__
 from halyk.config import Settings
 from halyk.hashing import sha256_file
+from halyk.knowledge.errata import ErrataRegistry
 from halyk.models.manifest import RunManifest, RunMode, RunStatus
 
 MANIFEST_NAME = "run_manifest.json"
@@ -94,6 +95,7 @@ class RunContext:
             halyk_version=__version__,
             models=self.settings.model_versions(),
             max_concurrency=self.settings.max_concurrency,
+            errata_sha256=ErrataRegistry.load().digest,
             replayed_from=replayed_from,
         )
 

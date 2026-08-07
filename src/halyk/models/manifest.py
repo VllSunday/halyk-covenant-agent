@@ -44,6 +44,10 @@ class RunManifest(BaseModel):
     temperature: float = 0.0
     max_concurrency: int
 
+    # Официальные исправления меняют ответ наравне с документами, поэтому версия
+    # реестра фиксируется здесь: без неё прогон не воспроизводится.
+    errata_sha256: str | None = None
+
     submission_sha256: str | None = None
     model_cache_sha256: str | None = None
 
