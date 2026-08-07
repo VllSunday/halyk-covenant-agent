@@ -1,0 +1,149 @@
+{
+  "$defs": {
+    "DecisionSource": {
+      "description": "Кто решил. Порядок — от самого сильного основания к самому слабому.",
+      "enum": [
+        "document",
+        "agreement",
+        "rule_only",
+        "model_only",
+        "verifier",
+        "unresolved"
+      ],
+      "title": "DecisionSource",
+      "type": "string"
+    },
+    "TransactionCategory": {
+      "enum": [
+        "revenue",
+        "opex",
+        "capex",
+        "payroll",
+        "utilities",
+        "rent",
+        "taxes",
+        "interest_expense",
+        "insurance_premium",
+        "financing_inflow",
+        "other",
+        "unknown"
+      ],
+      "title": "TransactionCategory",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Решение по одной операции вместе со всеми голосами, которые в него вошли.",
+  "properties": {
+    "account_id": {
+      "title": "Account Id",
+      "type": "string"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
+    },
+    "decision_source": {
+      "$ref": "#/$defs/DecisionSource"
+    },
+    "evidence": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evidence"
+    },
+    "final_category": {
+      "$ref": "#/$defs/TransactionCategory"
+    },
+    "model_category": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TransactionCategory"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "note": {
+      "default": "",
+      "title": "Note",
+      "type": "string"
+    },
+    "rule_category": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TransactionCategory"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "rule_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rule Id"
+    },
+    "txn_id": {
+      "title": "Txn Id",
+      "type": "string"
+    },
+    "verifier_category": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TransactionCategory"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "verifier_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Verifier Reason"
+    }
+  },
+  "required": [
+    "txn_id",
+    "account_id",
+    "final_category",
+    "decision_source"
+  ],
+  "title": "ClassificationRecord",
+  "type": "object"
+}

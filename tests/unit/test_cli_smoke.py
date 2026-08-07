@@ -32,6 +32,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     # настройки вместо того, какая роль ушла в какой вызов.
     monkeypatch.setenv("HALYK_OCR_EFFORT", "low")
     monkeypatch.setenv("HALYK_COMPILER_EFFORT", "high")
+    monkeypatch.setenv("HALYK_CLASSIFIER_EFFORT", "medium")
     monkeypatch.setenv("HALYK_VERIFIER_EFFORT", "xhigh")
     return log
 
@@ -47,7 +48,7 @@ def test_single_role_makes_a_single_call(calls: list[dict[str, Any]]) -> None:
 def test_all_roles_are_checked_by_default(calls: list[dict[str, Any]]) -> None:
     result = CliRunner().invoke(app, ["smoke"])
     assert result.exit_code == 0, result.output
-    assert [call["reasoning"]["effort"] for call in calls] == ["low", "high", "xhigh"]
+    assert [call["reasoning"]["effort"] for call in calls] == ["low", "high", "medium", "xhigh"]
 
 
 def test_unknown_role_is_rejected_before_any_call(calls: list[dict[str, Any]]) -> None:

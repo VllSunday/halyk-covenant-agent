@@ -41,6 +41,7 @@ class ModelConfig:
 class Settings:
     compiler: ModelConfig
     ocr: ModelConfig
+    classifier: ModelConfig
     verifier: ModelConfig
     artifacts_dir: Path
     max_concurrency: int
@@ -64,6 +65,13 @@ class Settings:
                 api_key=api_key,
                 reasoning_effort=os.getenv("HALYK_OCR_EFFORT", "low"),
             ),
+            # Отнесение операции к статье — задача чтения, а не вывода: высокий
+            # уровень рассуждения удлиняет двенадцать батчей, не меняя ответа.
+            classifier=ModelConfig(
+                name=os.getenv("HALYK_CLASSIFIER_MODEL", DEFAULT_MODEL),
+                api_key=api_key,
+                reasoning_effort=os.getenv("HALYK_CLASSIFIER_EFFORT", "medium"),
+            ),
             verifier=ModelConfig(
                 name=os.getenv("HALYK_VERIFIER_MODEL", DEFAULT_MODEL),
                 api_key=api_key,
@@ -78,5 +86,6 @@ class Settings:
         return {
             "covenant_compiler": self.compiler.name,
             "ocr": self.ocr.name,
+            "classifier": self.classifier.name,
             "verifier": self.verifier.name,
         }

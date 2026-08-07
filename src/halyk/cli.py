@@ -46,7 +46,7 @@ app = typer.Typer(
 console = Console()
 error_console = Console(stderr=True, style="red")
 
-SMOKE_ROLES = ("ocr", "compiler", "verifier")
+SMOKE_ROLES = ("ocr", "compiler", "classifier", "verifier")
 
 
 def _latest_run(artifacts_dir: Path) -> Path:
@@ -426,6 +426,99 @@ def facts(
 
 
 @app.command()
+def classify(
+    dataset: Annotated[Path, typer.Option("--dataset", exists=True, file_okay=False)],
+    template: Annotated[Path, typer.Option("--template", exists=True)],
+    *,
+    ocr: Annotated[
+        bool, typer.Option("--ocr", help="Распознавать страницы без пригодного текста")
+    ] = False,
+    out_dir: Annotated[Path, typer.Option("--out", help="Каталог для артефактов")] = Path(
+        "artifacts/classification"
+    ),
+    period_start: Annotated[str, typer.Option("--period-start")] = "2025-01-01",
+    period_end: Annotated[str, typer.Option("--period-end")] = "2025-12-31",
+    strict: Annotated[
+        bool, typer.Option("--strict", help="Ненулевой код возврата при нераспознанных статьях")
+    ] = False,
+) -> None:
+    """Отнести операции заёмщиков к статьям, которыми оперируют ковенанты.
+
+    Строгий режим — для разработки: он падает на первой же неразобранной операции.
+    Боевой прогон так делать не должен, там одна неясная строка не может стоить
+    зачёта по остальным ковенантам.
+    """
+    from halyk.ingest.inventory import build_inventory  # noqa: PLC0415
+    from halyk.ingest.normalise import CovenantPeriod, normalise  # noqa: PLC0415
+    from halyk.knowledge.classifier import TransactionClassifier  # noqa: PLC0415
+    from halyk.knowledge.facts import build_facts  # noqa: PLC0415
+    from halyk.llm.cache import CachePolicy, ModelCache  # noqa: PLC0415
+    from halyk.llm.classify import CategoryClassifier, cache_signature  # noqa: PLC0415
+    from halyk.output.template import SubmissionTemplate  # noqa: PLC0415
+
+    settings = Settings.from_env()
+    try:
+        settings.classifier.require_key()
+    except ConfigError as exc:
+        error_console.print(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    engine = _ocr_engine(settings, enabled=ocr)
+    period = CovenantPeriod(
+        start=date.fromisoformat(period_start), end=date.fromisoformat(period_end)
+    )
+    scenarios = SubmissionTemplate.load(template).scenarios
+    inventory = build_inventory(dataset, scenarios, engine)
+    ledger = normalise(inventory.ledger, build_facts(inventory).adjustments, period)
+    accounts = sorted(inventory.scenarios.scenario_to_account.values())
+
+    def cache(name: str) -> ModelCache:
+        return ModelCache(
+            directory=settings.artifacts_dir / "cache" / name, policy=CachePolicy.READ_WRITE
+        )
+
+    classifier = TransactionClassifier(
+        model=CategoryClassifier(config=settings.classifier, cache=cache("categories")),
+        verifier=CategoryClassifier(config=settings.verifier, cache=cache("categories-verifier")),
+    )
+    result = classifier.run(ledger, accounts)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(out_dir / "classification.jsonl", [r.record() for r in result.records])
+    summary = {
+        "prompt": cache_signature(),
+        "matrix": result.matrix(),
+        "usage": result.usage,
+        "totals": result.totals(),
+        "unresolved": [r.txn_id for r in result.unresolved],
+        "conflicts": [r.txn_id for r in result.conflicts],
+    }
+    (out_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+    table = Table(title="Как решено")
+    table.add_column("основание")
+    table.add_column("операций", justify="right")
+    for source, count in result.matrix().items():
+        table.add_row(source, str(count))
+    console.print(table)
+
+    usage = result.usage["model"]
+    console.print(
+        f"Батчей {usage['batches']}, живых {usage['live_calls']}, из кэша {usage['cache_hits']}, "
+        f"токенов {usage['total_tokens']}, {usage['seconds_total']:.1f} c; "
+        f"проверок verifier {result.usage['verifier_transactions']}"
+    )
+    console.print(f"Артефакты: {out_dir}")
+
+    for record in result.unresolved:
+        error_console.print(f"без статьи: {record.txn_id} — {record.note}")
+    if strict and result.unresolved:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def smoke(
     role: Annotated[
         str | None,
@@ -449,7 +542,12 @@ def smoke(
         raise typer.Exit(code=2)
 
     settings = Settings.from_env()
-    by_role = {"ocr": settings.ocr, "compiler": settings.compiler, "verifier": settings.verifier}
+    by_role = {
+        "ocr": settings.ocr,
+        "compiler": settings.compiler,
+        "classifier": settings.classifier,
+        "verifier": settings.verifier,
+    }
     for role_name, config in ((r, by_role[r]) for r in SMOKE_ROLES if role in (None, r)):
         # Отсутствие ключа — обычная ситуация настройки, а не сбой: показываем
         # причину строкой, без трассировки на пол-экрана.

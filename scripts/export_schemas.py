@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 from halyk.models.adjustment import AdjustmentAdapter, NormalisedTransaction
+from halyk.models.classification import ClassificationRecord
 from halyk.models.covenant import CovenantIR
 from halyk.models.fact import FactAdapter
 from halyk.models.lineage import LineageRecord
@@ -25,6 +26,7 @@ from halyk.models.submission import Submission
 # описала бы артефакт, в котором лежат все.
 EXPORTED: dict[str, type[BaseModel] | TypeAdapter[Any]] = {
     "adjustment": AdjustmentAdapter,
+    "classification": ClassificationRecord,
     "covenant_ir": CovenantIR,
     "fact": FactAdapter,
     "lineage": LineageRecord,
