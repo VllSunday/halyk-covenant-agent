@@ -392,6 +392,11 @@ class StructuredModelRunner:
                 # В кэш ложится только разобранное. Невалидный ответ, сохранённый
                 # обычным образом, воспроизводил бы ошибку на каждом прогоне.
                 self.cache.put(key, payload)
+                # Успешный semantic retry — итоговый ответ на исходный запрос.
+                # Кладём его и под канонический ключ первой попытки: следующий
+                # прогон не должен снова оплачивать заведомо неудачный первый ответ.
+                if attempt > 1:
+                    self.cache.put(self.key(request, attempt=1), payload)
                 return parsed
             retry_note = note
 

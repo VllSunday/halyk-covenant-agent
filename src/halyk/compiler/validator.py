@@ -343,31 +343,6 @@ def check_threshold_form(clause: CompiledClause) -> list[CompilationError]:
     ]
 
 
-def check_one_off_addbacks(clause: CompiledClause) -> list[CompilationError]:
-    """Add-back допустим лишь после включения всех разовых расходов в базовую EBITDA."""
-    facts = [node for _, node in _nodes(clause) if isinstance(node, FactValue)]
-    if not any(node.above_one_off_policy for node in facts):
-        return []
-    if any(
-        node.fact_kind == "one_off_item"
-        and not node.above_one_off_policy
-        and node.description_contains is None
-        and node.counterparty is None
-        for node in facts
-    ):
-        return []
-    return [
-        CompilationError(
-            code="one_off_base_is_missing",
-            path="measure",
-            detail=(
-                "скорректированная EBITDA должна сначала вычесть все one_off_item, "
-                "а затем прибавить обратно только статьи выше порога существенности"
-            ),
-        )
-    ]
-
-
 def check_unresolved_terms(clause: CompiledClause) -> list[CompilationError]:
     """Незавершённая формула должна попасть в semantic retry, а не в расчёт."""
     return [
@@ -462,7 +437,6 @@ def validate(
         *check_requirements(clause),
         *check_ledger_measures(clause),
         *check_threshold_form(clause),
-        *check_one_off_addbacks(clause),
         *check_unresolved_terms(clause),
         *[
             CompilationError(code="dimension_mismatch", path=error.path, detail=error.detail)

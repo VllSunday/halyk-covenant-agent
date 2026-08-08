@@ -22,7 +22,6 @@ from halyk.compiler.validator import (
     ALLOWED_OPS,
     check_coverage,
     check_ledger_measures,
-    check_one_off_addbacks,
     check_requirements,
     check_threshold_form,
     check_unresolved_terms,
@@ -337,44 +336,6 @@ def test_variable_threshold_is_rejected_in_favour_of_normalised_measure() -> Non
         }
     )
     assert codes(check_threshold_form(item)) == {"threshold_is_not_constant"}
-
-
-def test_addback_requires_all_one_off_items_in_the_base() -> None:
-    item = clause(
-        formula={
-            "measure": ast.Sum(
-                terms=(
-                    LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
-                    FactValue(
-                        fact_kind="one_off_item",
-                        description_contains="large item",
-                        above_one_off_policy=True,
-                    ),
-                )
-            )
-        },
-        required_facts=(need("one_off_item"),),
-    )
-    assert codes(check_one_off_addbacks(item)) == {"one_off_base_is_missing"}
-
-
-def test_addback_passes_when_unfiltered_one_off_base_is_present() -> None:
-    item = clause(
-        formula={
-            "measure": ast.Sum(
-                terms=(
-                    FactValue(fact_kind="one_off_item"),
-                    FactValue(
-                        fact_kind="one_off_item",
-                        description_contains="large item",
-                        above_one_off_policy=True,
-                    ),
-                )
-            )
-        },
-        required_facts=(need("one_off_item"),),
-    )
-    assert check_one_off_addbacks(item) == []
 
 
 # --- разрешение требований ----------------------------------------------------

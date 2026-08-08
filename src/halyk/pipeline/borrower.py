@@ -30,11 +30,13 @@ from halyk.ingest.inventory import DatasetInventory
 from halyk.ingest.normalise import CovenantPeriod, NormalisedLedger, normalise
 from halyk.knowledge.classifier import ClassificationResult
 from halyk.knowledge.facts import FactSet
+from halyk.knowledge.kyc import normalise_counterparty
 from halyk.knowledge.related_party import RelatedPartyError, RelatedPartyIndex, build_index
 from halyk.llm.documents import index
 from halyk.models.adjustment import Adjustment
+from halyk.models.classification import TransactionCategory
 from halyk.models.document import DocumentFacts
-from halyk.models.fact import Fact, RelatedPartyPolicyFact
+from halyk.models.fact import Fact, OneOffItemFact, RelatedPartyPolicyFact
 from halyk.models.lineage import InvariantCheck
 from halyk.models.result import Verdict
 from halyk.models.transaction import LedgerRow
@@ -81,7 +83,31 @@ class BorrowerResult:
     resolver_batches: int = 0
 
 
-def with_categories(ledger: NormalisedLedger, classified: ClassificationResult) -> NormalisedLedger:
+def _one_off_rows(ledger: NormalisedLedger, facts: Sequence[Fact]) -> frozenset[str]:
+    """Проводки, которые примечания прямо называют разовыми расходами."""
+    found: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, OneOffItemFact) or not fact.counterparty:
+            continue
+        matched = [
+            transaction.txn_id
+            for transaction in ledger.transactions
+            if transaction.amount is not None
+            and transaction.amount.currency is fact.amount.currency
+            and abs(transaction.amount.minor) == abs(fact.amount.minor)
+            and normalise_counterparty(transaction.row.counterparty)
+            == normalise_counterparty(fact.counterparty)
+        ]
+        if len(matched) == 1:
+            found.add(matched[0])
+    return frozenset(found)
+
+
+def with_categories(
+    ledger: NormalisedLedger,
+    classified: ClassificationResult,
+    facts: Sequence[Fact] = (),
+) -> NormalisedLedger:
     """Проставить операциям статью, к которой их отнесли.
 
     Нерешённая операция сохраняет то, что было: формулировка документа, которую мы не
@@ -93,10 +119,23 @@ def with_categories(ledger: NormalisedLedger, classified: ClassificationResult) 
         for record in classified.records
         if record.final_category.is_decided
     }
+    documented_one_offs = _one_off_rows(ledger, facts)
     transactions = tuple(
-        transaction.model_copy(update={"covenant_category": category.value})
+        transaction.model_copy(
+            update={
+                "covenant_category": (
+                    TransactionCategory.OPEX.value
+                    if transaction.txn_id in documented_one_offs and not transaction.is_adjusted
+                    else category.value
+                )
+            }
+        )
         if (category := decided.get(transaction.txn_id)) is not None
-        else transaction
+        else (
+            transaction.model_copy(update={"covenant_category": TransactionCategory.OPEX.value})
+            if transaction.txn_id in documented_one_offs and not transaction.is_adjusted
+            else transaction
+        )
         for transaction in ledger.transactions
     )
     return replace(ledger, transactions=transactions)
@@ -275,7 +314,7 @@ def solve_borrower(
     )
 
     classified = engines.classifier.run(ledger, [account_id])
-    ledger = with_categories(ledger, classified)
+    ledger = with_categories(ledger, classified, all_facts)
 
     related, notes = _related_index(all_facts, account_id)
     executor = Executor(

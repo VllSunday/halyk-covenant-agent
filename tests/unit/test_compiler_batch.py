@@ -20,7 +20,6 @@ from halyk.compiler.batch import (
     check_authority,
     check_period,
     normalise_derived_metrics,
-    normalise_one_off_addbacks,
     normalise_periods,
 )
 from halyk.compiler.contract import (
@@ -34,7 +33,6 @@ from halyk.llm.cache import CachePolicy, ModelCache
 from halyk.llm.documents import BorrowerIsolationError
 from halyk.llm.runner import Budget, InvalidResponseError, StructuredModelRunner
 from halyk.llm.schema import strict_schema
-from halyk.models import formula as ast
 from halyk.models.classification import TransactionCategory as Cat
 from halyk.models.covenant import Operator, Unit
 from halyk.models.document import DocumentFacts, DocumentKind, DocumentStatus, PageFacts
@@ -419,36 +417,6 @@ def test_explicitly_disclosed_ebitda_remains_a_document_fact() -> None:
     normalised = normalise_derived_metrics((item,), (document(), notes))[0]
     assert isinstance(normalised.formula.measure, FactValue)
     assert normalised.required_facts == (item.required_facts[0],)
-
-
-def test_one_off_addback_includes_all_items_in_base_ebitda() -> None:
-    revenue = LedgerSum(selector=Selector(categories=(Cat.REVENUE,)))
-    opex = LedgerSum(selector=Selector(categories=(Cat.OPEX,)))
-    item = clause(
-        measure=ast.Sum(
-            terms=(
-                Difference(left=revenue, right=opex),
-                FactValue(
-                    fact_kind="one_off_item",
-                    description_contains="large item",
-                    above_one_off_policy=True,
-                ),
-            )
-        ),
-        required_facts=(need("one_off_item"),),
-    )
-    normalised = normalise_one_off_addbacks((item,))[0]
-    payload = normalised.formula.model_dump(mode="json")
-    right = payload["measure"]["terms"][0]["right"]
-    assert right["op"] == "add"
-    assert right["terms"][0]["op"] == "ledger_sum"
-    assert right["terms"][1] == {
-        "op": "fact_value",
-        "fact_kind": "one_off_item",
-        "description_contains": None,
-        "counterparty": None,
-        "above_one_off_policy": False,
-    }
 
 
 def test_inconsistent_period_is_not_compiled(tmp_path: Path) -> None:

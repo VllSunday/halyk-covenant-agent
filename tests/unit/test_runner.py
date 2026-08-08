@@ -306,6 +306,18 @@ def test_invalid_answer_triggers_one_semantic_retry(tmp_path: Path) -> None:
     assert engine.usage()["invalid_responses"] == 1
 
 
+def test_successful_semantic_retry_becomes_canonical_cache_entry(tmp_path: Path) -> None:
+    first = runner(tmp_path, responder=Responder({"wrong": 1}, {"value": 42}))
+    assert first.run(request(), parse) == 42
+
+    second_responder = Responder(AssertionError("network must not be called"))
+    second = runner(tmp_path, responder=second_responder)
+    assert second.run(request(), parse) == 42
+    assert second_responder.sent == 0
+    assert [call.attempt for call in second.calls] == [1]
+    assert second.calls[0].cache_hit
+
+
 def test_two_invalid_answers_give_up(tmp_path: Path) -> None:
     engine = runner(tmp_path, responder=(responder := Responder({"wrong": 1})))
 
