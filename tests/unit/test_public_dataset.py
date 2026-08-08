@@ -461,3 +461,10 @@ def test_p5_capital_intensity_matches_the_key(ledger: NormalisedLedger, facts: F
     key = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
     cell = key["scenarios"]["P5"]["covenants"]["6.1"]
     assert (Decimal(str(cell["actual"])), cell["status"]) == (Decimal("9.45"), "BREACH")
+
+
+def test_language_hint_surfaces_the_english_report(inventory: DatasetInventory) -> None:
+    """Англоязычный документ должен быть виден в отчёте, а не по пропавшей ячейке."""
+    report = inventory.report()
+    assert report["languages"]["en"] == 1
+    assert [doc["document"] for doc in report["non_russian_documents"]] == ["a5cc1400b640.pdf"]

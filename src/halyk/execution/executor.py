@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
+from halyk.knowledge.kyc import normalise_counterparty
 from halyk.knowledge.related_party import RelatedPartyError, RelatedPartyIndex
 from halyk.models.adjustment import NormalisedTransaction
 from halyk.models.classification import TransactionCategory
@@ -103,6 +104,20 @@ class Value:
 
 
 @dataclass(frozen=True, slots=True)
+class Verdict:
+    """Число и вердикт без улики. Промежуточная форма для контрфактического перебора."""
+
+    actual: Decimal
+    breached: bool
+    triggered: bool
+    rows: frozenset[str]
+    facts: frozenset[str]
+    trigger_rows: frozenset[str]
+    trigger_facts: frozenset[str]
+    diagnostics: frozenset[tuple[Diagnostic, str]]
+
+
+@dataclass(frozen=True, slots=True)
 class Outcome:
     """Ответ по одной ячейке."""
 
@@ -114,6 +129,10 @@ class Outcome:
     rows: tuple[str, ...]
     facts: tuple[str, ...]
     diagnostics: tuple[tuple[Diagnostic, str], ...]
+    # Строки и факты условия срабатывания держатся отдельно от строк расчёта: в
+    # `actual` они не входят, но без них не объяснить, почему пункт применён.
+    trigger_rows: tuple[str, ...] = ()
+    trigger_facts: tuple[str, ...] = ()
     triggered: bool = True
     failure: Failure | None = None
     failure_path: str | None = None
@@ -196,8 +215,13 @@ class Executor:
                 not selector.categories
                 or transaction.covenant_category in {c.value for c in selector.categories},
                 not selector.months or transaction.effective_date.month in selector.months,
+                # Названия сверяются в нормализованной форме, той же, что у связанных
+                # сторон: в реестре и в договоре одна компания пишется по-разному
+                # («Aktau Holdings LLP» против «Aktau Holdings L.L.P.»). Сходство здесь
+                # не используется — только точное совпадение после нормализации.
                 not selector.counterparties
-                or transaction.row.counterparty in selector.counterparties,
+                or normalise_counterparty(transaction.row.counterparty)
+                in {normalise_counterparty(name) for name in selector.counterparties},
                 selector.direction is not Direction.OUTFLOW or amount < 0,
                 selector.direction is not Direction.INFLOW or amount > 0,
             )
@@ -310,7 +334,17 @@ class Executor:
                 return _combine(pick(p.amount for p in parts), parts)
 
     def _fact_value(self, node: FactValue, path: str) -> Value:
+        # Отсутствие порога и порог, равный нулю, — разные вещи. Без него в EBITDA
+        # попадёт всё упомянутое в примечаниях, и число выйдет завышенным, но
+        # правдоподобным. Такое молчание дороже остановки.
         minimum = self._one_off_minimum() if node.above_one_off_policy else None
+        if node.above_one_off_policy and minimum is None:
+            raise ExecutionError(
+                Failure.MISSING_FACT,
+                path,
+                f"{self.account_id}: формула ссылается на порог существенности "
+                f"разовых статей, но он в документах не раскрыт",
+            )
         total = Decimal(0)
         used: set[str] = set()
         for fact in self.facts:
@@ -371,34 +405,62 @@ class Executor:
                 failure_detail=exc.detail,
             )
 
-    def _run(self, formula: CovenantFormula) -> Outcome:
+    def _verdict(self, formula: CovenantFormula) -> Verdict:
+        """Число и вердикт без выбора улики.
+
+        Отделено от `_run` намеренно: контрфактический перебор пересчитывает ячейку
+        по разу на строку, и если бы каждый пересчёт снова искал улику, работа росла
+        бы факториально от числа строк расчёта.
+        """
         measured = self.evaluate(formula.measure)
         threshold = self.evaluate(formula.threshold, "threshold")
 
         triggered = True
+        trigger_rows: frozenset[str] = frozenset()
+        trigger_facts: frozenset[str] = frozenset()
+        trigger_notes: frozenset[tuple[Diagnostic, str]] = frozenset()
         if formula.applies_when is not None:
-            triggered, _, _ = self.check(formula.applies_when, "applies_when")
+            triggered, left, right = self.check(formula.applies_when, "applies_when")
+            # Строки условия входят в объяснение наравне со строками расчёта: без них
+            # непонятно, почему пункт сработал или не сработал.
+            trigger_rows = left.rows | right.rows
+            trigger_facts = left.facts | right.facts
+            trigger_notes = left.diagnostics | right.diagnostics
 
         # Округление до сравнения, а не после: эталон сверяется с числом, которое мы
         # заявили, и вердикт обязан относиться к нему же.
         actual = quantize(measured.amount, formula.rounding.scale, formula.rounding.mode)
         holds = formula.operator.holds(actual, threshold.amount)
-        breached = triggered and not holds
+        return Verdict(
+            actual=actual,
+            breached=triggered and not holds,
+            triggered=triggered,
+            rows=measured.rows,
+            facts=measured.facts,
+            trigger_rows=trigger_rows,
+            trigger_facts=trigger_facts,
+            diagnostics=measured.diagnostics | threshold.diagnostics | trigger_notes,
+        )
+
+    def _run(self, formula: CovenantFormula) -> Outcome:
+        verdict = self._verdict(formula)
 
         evidence = None
-        if breached and formula.evidence is EvidenceMode.COUNTERFACTUAL:
-            evidence = self._evidence(formula, measured.rows)
+        if verdict.breached and formula.evidence is EvidenceMode.COUNTERFACTUAL:
+            evidence = self._evidence(formula, verdict.rows)
 
         return Outcome(
             scenario_id=formula.scenario_id,
             clause_id=formula.clause_id,
-            actual=actual,
-            status="BREACH" if breached else "COMPLIANT",
+            actual=verdict.actual,
+            status="BREACH" if verdict.breached else "COMPLIANT",
             evidence_txn_id=evidence,
-            rows=tuple(sorted(measured.rows)),
-            facts=tuple(sorted(measured.facts)),
-            diagnostics=tuple(sorted(measured.diagnostics | threshold.diagnostics)),
-            triggered=triggered,
+            rows=tuple(sorted(verdict.rows)),
+            facts=tuple(sorted(verdict.facts)),
+            trigger_rows=tuple(sorted(verdict.trigger_rows)),
+            trigger_facts=tuple(sorted(verdict.trigger_facts)),
+            diagnostics=tuple(sorted(verdict.diagnostics)),
+            triggered=verdict.triggered,
         )
 
     def _evidence(self, formula: CovenantFormula, rows: frozenset[str]) -> str | None:
@@ -416,12 +478,14 @@ class Executor:
         for txn_id in sorted(rows):
             without = self.with_excluded(frozenset({txn_id}))
             try:
-                probe = without._run(formula)
+                # Только вердикт: вложенный поиск улики здесь ничего не добавил бы,
+                # а работу умножил бы на число строк ещё раз.
+                probe = without._verdict(formula)
             except ExecutionError:
                 # Изъятие строки сделало расчёт невозможным — значит она не улика,
                 # а несущая конструкция расчёта.
                 continue
-            if probe.status == "COMPLIANT":
+            if not probe.breached:
                 culprits.append(txn_id)
         return culprits[0] if len(culprits) == 1 else None
 

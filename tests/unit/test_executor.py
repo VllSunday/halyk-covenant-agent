@@ -497,3 +497,115 @@ def test_ppe_roll_forward_feeds_the_formula() -> None:
     )
     assert result.actual == Decimal("9.45")
     assert result.status == "BREACH"
+
+
+# --- регрессии corrective pass ------------------------------------------------
+
+
+def test_evidence_probe_never_searches_for_evidence_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Перебор улики считает вердикт, а не полную ячейку.
+
+    Вложенный поиск улики умножал бы работу на число строк ещё раз, ничего не добавляя
+    к ответу. Считаем вызовы: `_evidence` обязан отработать ровно один раз.
+    """
+    calls = 0
+    original = Executor._evidence
+
+    def counted(self: Executor, *args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Executor, "_evidence", counted)
+    rows = [txn(f"T{i}", "-400", Cat.CAPEX) for i in range(1, 6)]
+    result = executor(*rows).run(formula(threshold=Constant(value=Decimal("1000"))))
+
+    assert result.status == "BREACH"
+    assert calls == 1
+
+
+def test_missing_one_off_policy_is_a_failure_not_a_silent_zero() -> None:
+    """Порога существенности нет — значит в EBITDA попало бы всё подряд."""
+    facts = (
+        OneOffItemFact(
+            account_id=ACCOUNT,
+            source=SOURCE,
+            description="разовая статья",
+            counterparty="X",
+            amount=Money.from_decimal(1000, Currency.USD),
+        ),
+    )
+    engine = Executor(account_id=ACCOUNT, transactions=(), facts=facts)
+    result = engine.run(
+        formula(measure=FactValue(fact_kind="one_off_item", above_one_off_policy=True))
+    )
+    assert result.failure is Failure.MISSING_FACT
+    assert result.failure_detail is not None
+    assert "порог существенности" in result.failure_detail
+
+
+def test_trigger_rows_and_diagnostics_reach_the_outcome() -> None:
+    """Строки условия срабатывания нужны в объяснении, хотя в actual не входят."""
+    result = executor(
+        txn("T1", "-5000", Cat.CAPEX),
+        txn("T2", "-100", Cat.INTEREST_EXPENSE),
+    ).run(
+        formula(
+            threshold=Constant(value=Decimal("1000")),
+            applies_when=Condition(
+                left=spend(Cat.INTEREST_EXPENSE),
+                operator=Operator.GT,
+                right=Constant(value=Decimal("50")),
+            ),
+        )
+    )
+    assert result.triggered is True
+    assert result.trigger_rows == ("T2",)
+    assert "T2" not in result.rows
+
+
+def test_trigger_diagnostics_are_kept() -> None:
+    """Пустая выборка внутри условия тоже должна быть видна в отчёте."""
+    result = executor(txn("T1", "-5000", Cat.CAPEX)).run(
+        formula(
+            threshold=Constant(value=Decimal("1000")),
+            applies_when=Condition(
+                left=spend(Cat.PAYROLL),
+                operator=Operator.GT,
+                right=Constant(value=Decimal("1")),
+            ),
+        )
+    )
+    assert any(path.startswith("applies_when") for _, path in result.diagnostics)
+
+
+def test_named_counterparties_are_matched_after_normalisation() -> None:
+    """`Aktau Holdings LLP` в договоре и `Aktau Holdings L.L.P.` в реестре — одно лицо."""
+    result = executor(
+        txn("T1", "-1000", Cat.OPEX, counterparty="Aktau Holdings L.L.P."),
+        txn("T2", "-500", Cat.OPEX, counterparty="Northwind Catering"),
+    ).run(
+        formula(
+            measure=LedgerSum(
+                selector=Selector(categories=(Cat.OPEX,), counterparties=("Aktau Holdings LLP",))
+            ),
+            threshold=Constant(value=Decimal("99999")),
+        )
+    )
+    assert result.actual == Decimal("1000.00")
+    assert result.rows == ("T1",)
+
+
+def test_named_counterparties_do_not_match_by_similarity() -> None:
+    """Нормализация — да, сходство — нет: опечатка не должна втягивать строку."""
+    result = executor(
+        txn("T1", "-1000", Cat.OPEX, counterparty="Aktau Holdinqs LLP"),
+    ).run(
+        formula(
+            measure=LedgerSum(
+                selector=Selector(categories=(Cat.OPEX,), counterparties=("Aktau Holdings LLP",))
+            ),
+            threshold=Constant(value=Decimal("99999")),
+        )
+    )
+    assert result.actual == Decimal("0.00")

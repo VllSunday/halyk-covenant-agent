@@ -89,6 +89,12 @@ class DatasetInventory:
                 {"document": name, "page": page.number, "reason": page.ocr_reason.value}
                 for name, page in self.ocr_pages
             ],
+            "languages": dict(sorted(Counter(doc.language_hint for doc in self.documents).items())),
+            "non_russian_documents": [
+                {"document": doc.file_name, "language": doc.language_hint, "kind": doc.kind.value}
+                for doc in self.documents
+                if doc.language_hint in ("en", "mixed") and doc.kind.is_relevant
+            ],
             "unresolved_documents": list(self.unresolved_documents),
             "unclassified_pending_ocr": list(self.unclassified_pending_ocr),
             # Расход и время распознавания попадают в артефакт, а не только в

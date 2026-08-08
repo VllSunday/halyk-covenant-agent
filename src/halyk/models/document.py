@@ -119,5 +119,38 @@ class DocumentFacts(BaseModel):
         return sum(page.char_count for page in self.pages)
 
     @property
+    def letters(self) -> tuple[int, int]:
+        """Латиница и кириллица по буквам.
+
+        Считаются только буквы: цифры, суммы и пунктуация одинаковы в обоих языках и
+        размыли бы долю до бессмысленной.
+        """
+        latin = cyrillic = 0
+        for char in self.text:
+            if "a" <= (lowered := char.lower()) <= "z":
+                latin += 1
+            elif "а" <= lowered <= "я" or lowered == "ё":
+                cyrillic += 1
+        return latin, cyrillic
+
+    @property
+    def language_hint(self) -> str:
+        """Подсказка о языке документа, а не проверка.
+
+        Нужна затем, чтобы англоязычный документ было видно в отчёте сразу, а не по
+        пропавшей ячейке: ровно так мы потеряли консолидированную отчётность. Именно
+        подсказка — двуязычный документ или английское название внутри русского текста
+        нормальны и прогон ронять не должны.
+        """
+        latin, cyrillic = self.letters
+        if not latin and not cyrillic:
+            return "unknown"
+        if not cyrillic:
+            return "en"
+        if not latin:
+            return "ru"
+        return "mixed" if latin > cyrillic / 4 else "ru"
+
+    @property
     def pages_needing_ocr(self) -> tuple[PageFacts, ...]:
         return tuple(page for page in self.pages if page.needs_ocr)
