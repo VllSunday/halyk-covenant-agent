@@ -72,6 +72,12 @@ class ProviderError(RuntimeError):
     request_id = "req-rejected"
 
 
+class QuotaError(RuntimeError):
+    status_code = 429
+    code = "insufficient_quota"
+    request_id = "req-no-credit"
+
+
 def runner(
     tmp_path: Path,
     *,
@@ -360,6 +366,18 @@ def test_non_transport_error_is_not_retried(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="bad request"):
+        engine.run(request(), parse)
+    assert responder.sent == 1
+
+
+def test_exhausted_credit_is_not_retried(tmp_path: Path) -> None:
+    engine = runner(
+        tmp_path,
+        transport_retries=5,
+        responder=(responder := Responder(QuotaError("credit_balance_exhausted"))),
+    )
+
+    with pytest.raises(QuotaError):
         engine.run(request(), parse)
     assert responder.sent == 1
 

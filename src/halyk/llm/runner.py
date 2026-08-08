@@ -292,6 +292,10 @@ def send_to_openai(config: ModelConfig, request: Request, api_key: str, attempt:
 
 def _is_transport_error(error: Exception) -> bool:
     text = f"{type(error).__name__} {error}".lower()
+    # HTTP 429 означает не только временный rate limit. Исчерпанный баланс
+    # повтором не лечится: повтор лишь трижды воспроизводит тот же отказ.
+    if "insufficient_quota" in text or "credit_balance_exhausted" in text:
+        return False
     return any(marker in text for marker in _TRANSPORT_MARKERS)
 
 
