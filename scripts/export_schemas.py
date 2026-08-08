@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, TypeAdapter
 
+from halyk.compiler.contract import CompilerResponse
 from halyk.models.adjustment import AdjustmentAdapter, NormalisedTransaction
 from halyk.models.classification import ClassificationRecord
 from halyk.models.covenant import CovenantIR
@@ -28,6 +29,7 @@ from halyk.models.submission import Submission
 EXPORTED: dict[str, type[BaseModel] | TypeAdapter[Any]] = {
     "adjustment": AdjustmentAdapter,
     "classification": ClassificationRecord,
+    "compiler_response": CompilerResponse,
     "covenant_formula": CovenantFormula,
     "covenant_ir": CovenantIR,
     "fact": FactAdapter,

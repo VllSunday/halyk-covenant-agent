@@ -1,0 +1,1493 @@
+{
+  "$defs": {
+    "Absolute": {
+      "properties": {
+        "op": {
+          "const": "abs",
+          "default": "abs",
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "Absolute",
+      "type": "object"
+    },
+    "BoundingBox": {
+      "description": "Координаты в системе PyMuPDF: начало в левом верхнем углу, единица — пункт.",
+      "properties": {
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "CompiledClause": {
+      "description": "Один пункт, переведённый в исполнимую форму.",
+      "properties": {
+        "formula": {
+          "$ref": "#/$defs/CovenantFormula"
+        },
+        "period_end": {
+          "format": "date",
+          "title": "Period End",
+          "type": "string"
+        },
+        "period_start": {
+          "format": "date",
+          "title": "Period Start",
+          "type": "string"
+        },
+        "required_facts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FactRequirement"
+          },
+          "title": "Required Facts",
+          "type": "array"
+        },
+        "unresolved_terms": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Terms",
+          "type": "array"
+        }
+      },
+      "required": [
+        "formula",
+        "period_start",
+        "period_end"
+      ],
+      "title": "CompiledClause",
+      "type": "object"
+    },
+    "Condition": {
+      "description": "Сравнение двух величин. Само по себе вердикта не даёт.",
+      "properties": {
+        "left": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Left"
+        },
+        "operator": {
+          "$ref": "#/$defs/Operator"
+        },
+        "right": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Right"
+        }
+      },
+      "required": [
+        "left",
+        "operator",
+        "right"
+      ],
+      "title": "Condition",
+      "type": "object"
+    },
+    "Constant": {
+      "properties": {
+        "op": {
+          "const": "constant",
+          "default": "constant",
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "Constant",
+      "type": "object"
+    },
+    "CovenantFormula": {
+      "description": "Полная спецификация ковенанта: что считаем, с чем сравниваем, когда применяем.",
+      "properties": {
+        "applies_when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Condition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "clause_id": {
+          "title": "Clause Id",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceMode",
+          "default": "counterfactual"
+        },
+        "measure": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Measure"
+        },
+        "operator": {
+          "$ref": "#/$defs/Operator"
+        },
+        "quote": {
+          "title": "Quote",
+          "type": "string"
+        },
+        "rounding": {
+          "$ref": "#/$defs/RoundingSpec",
+          "default": {
+            "mode": "half_up",
+            "scale": 2
+          }
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "threshold": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Threshold"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "clause_id",
+        "title",
+        "measure",
+        "operator",
+        "threshold",
+        "unit",
+        "source_refs",
+        "quote",
+        "confidence"
+      ],
+      "title": "CovenantFormula",
+      "type": "object"
+    },
+    "Difference": {
+      "properties": {
+        "left": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Left"
+        },
+        "op": {
+          "const": "sub",
+          "default": "sub",
+          "title": "Op",
+          "type": "string"
+        },
+        "right": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Right"
+        }
+      },
+      "required": [
+        "left",
+        "right"
+      ],
+      "title": "Difference",
+      "type": "object"
+    },
+    "Direction": {
+      "description": "Знак операции в реестре. Расходы записаны отрицательными суммами.",
+      "enum": [
+        "inflow",
+        "outflow",
+        "any"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "DocumentKind": {
+      "description": "Тип документа. Определяется по содержимому: имена файлов обезличены.",
+      "enum": [
+        "loan_agreement",
+        "audit_procedures",
+        "financial_notes",
+        "kyc_file",
+        "treasury_memo",
+        "consolidated_report",
+        "unrelated"
+      ],
+      "title": "DocumentKind",
+      "type": "string"
+    },
+    "DocumentStatus": {
+      "description": "Действует ли документ и является ли он окончательным.\n\nДве оси уложены в одну шкалу намеренно: у договора значимо, не заменён ли он\nновой редакцией, у аудиторского отчёта — не является ли он черновиком. Обе\nотвечают на один вопрос — можно ли на документ опираться.",
+      "enum": [
+        "current",
+        "superseded",
+        "draft",
+        "final"
+      ],
+      "title": "DocumentStatus",
+      "type": "string"
+    },
+    "EvidenceMode": {
+      "description": "Как выбирается транзакция-улика.\n\nКонтрфактически — значит перебором: строка считается уликой, если без неё вердикт\nменяется. Правил вида «самая крупная» здесь нет намеренно, условие задачи прямо\nотвергает их.",
+      "enum": [
+        "counterfactual",
+        "none"
+      ],
+      "title": "EvidenceMode",
+      "type": "string"
+    },
+    "ExternalMetric": {
+      "description": "Величина, которой в датасете может не быть.\n\nСуществует ради честного отказа: подставить сюда число, восстановленное из\nэталона, значит получить правильный ответ на открытом наборе и молчаливо неверный\nна приватном. Исполнитель обязан вернуть отказ, а не догадку.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "op": {
+          "const": "external",
+          "default": "external",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "ExternalMetric",
+      "type": "object"
+    },
+    "FactRequirement": {
+      "description": "Величина, без которой формулу не посчитать.\n\nОбъявляется компилятором, а находится отдельно. Разделение нужно, чтобы\nненайденная величина не превращалась в ноль: `NEEDS_RESOLUTION` — это адрес для\nследующего шага поиска, а не результат.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "fact_kind": {
+          "title": "Fact Kind",
+          "type": "string"
+        },
+        "group_level": {
+          "default": false,
+          "title": "Group Level",
+          "type": "boolean"
+        },
+        "resolution": {
+          "$ref": "#/$defs/Resolution",
+          "default": "needs_resolution"
+        }
+      },
+      "required": [
+        "fact_kind",
+        "description"
+      ],
+      "title": "FactRequirement",
+      "type": "object"
+    },
+    "FactValue": {
+      "description": "Величина из документа, а не из реестра.\n\nОбязательство по программе выходных пособий, порог существенности разовых статей,\nдоля дочерних организаций в залоге — всё это раскрыто только в примечаниях и\nотдельной проводки не имеет.",
+      "properties": {
+        "above_one_off_policy": {
+          "default": false,
+          "title": "Above One Off Policy",
+          "type": "boolean"
+        },
+        "counterparty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Counterparty"
+        },
+        "description_contains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description Contains"
+        },
+        "fact_kind": {
+          "title": "Fact Kind",
+          "type": "string"
+        },
+        "op": {
+          "const": "fact_value",
+          "default": "fact_value",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_kind"
+      ],
+      "title": "FactValue",
+      "type": "object"
+    },
+    "Largest": {
+      "description": "Максимум из нескольких величин.\n\nТак выражается «по отдельности, а не в совокупности»: потолок нарушен, если его\nперешла хотя бы одна из статей, и в `actual` идёт та, что ближе всего к порогу.",
+      "properties": {
+        "op": {
+          "const": "max",
+          "default": "max",
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "abs": "#/$defs/Absolute",
+                "add": "#/$defs/Sum",
+                "constant": "#/$defs/Constant",
+                "div": "#/$defs/Ratio",
+                "external": "#/$defs/ExternalMetric",
+                "fact_value": "#/$defs/FactValue",
+                "ledger_count": "#/$defs/LedgerCount",
+                "ledger_sum": "#/$defs/LedgerSum",
+                "max": "#/$defs/Largest",
+                "min": "#/$defs/Smallest",
+                "mul": "#/$defs/Product",
+                "sub": "#/$defs/Difference"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LedgerSum"
+              },
+              {
+                "$ref": "#/$defs/LedgerCount"
+              },
+              {
+                "$ref": "#/$defs/FactValue"
+              },
+              {
+                "$ref": "#/$defs/Constant"
+              },
+              {
+                "$ref": "#/$defs/ExternalMetric"
+              },
+              {
+                "$ref": "#/$defs/Sum"
+              },
+              {
+                "$ref": "#/$defs/Difference"
+              },
+              {
+                "$ref": "#/$defs/Product"
+              },
+              {
+                "$ref": "#/$defs/Ratio"
+              },
+              {
+                "$ref": "#/$defs/Absolute"
+              },
+              {
+                "$ref": "#/$defs/Largest"
+              },
+              {
+                "$ref": "#/$defs/Smallest"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "title": "Largest",
+      "type": "object"
+    },
+    "LedgerCount": {
+      "properties": {
+        "op": {
+          "const": "ledger_count",
+          "default": "ledger_count",
+          "title": "Op",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/Selector"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "title": "LedgerCount",
+      "type": "object"
+    },
+    "LedgerSum": {
+      "description": "Сумма модулей отобранных операций.\n\nМодуль, а не знак: расходы в реестре отрицательны, а `actual` по условию задачи\nвсегда положителен. Знак несёт `Direction`, и складывать разнонаправленные строки\nбез него бессмысленно.",
+      "properties": {
+        "op": {
+          "const": "ledger_sum",
+          "default": "ledger_sum",
+          "title": "Op",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/Selector"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "title": "LedgerSum",
+      "type": "object"
+    },
+    "Operator": {
+      "enum": [
+        "ge",
+        "gt",
+        "le",
+        "lt",
+        "eq",
+        "ne"
+      ],
+      "title": "Operator",
+      "type": "string"
+    },
+    "Product": {
+      "properties": {
+        "factors": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "abs": "#/$defs/Absolute",
+                "add": "#/$defs/Sum",
+                "constant": "#/$defs/Constant",
+                "div": "#/$defs/Ratio",
+                "external": "#/$defs/ExternalMetric",
+                "fact_value": "#/$defs/FactValue",
+                "ledger_count": "#/$defs/LedgerCount",
+                "ledger_sum": "#/$defs/LedgerSum",
+                "max": "#/$defs/Largest",
+                "min": "#/$defs/Smallest",
+                "mul": "#/$defs/Product",
+                "sub": "#/$defs/Difference"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LedgerSum"
+              },
+              {
+                "$ref": "#/$defs/LedgerCount"
+              },
+              {
+                "$ref": "#/$defs/FactValue"
+              },
+              {
+                "$ref": "#/$defs/Constant"
+              },
+              {
+                "$ref": "#/$defs/ExternalMetric"
+              },
+              {
+                "$ref": "#/$defs/Sum"
+              },
+              {
+                "$ref": "#/$defs/Difference"
+              },
+              {
+                "$ref": "#/$defs/Product"
+              },
+              {
+                "$ref": "#/$defs/Ratio"
+              },
+              {
+                "$ref": "#/$defs/Absolute"
+              },
+              {
+                "$ref": "#/$defs/Largest"
+              },
+              {
+                "$ref": "#/$defs/Smallest"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Factors",
+          "type": "array"
+        },
+        "op": {
+          "const": "mul",
+          "default": "mul",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "factors"
+      ],
+      "title": "Product",
+      "type": "object"
+    },
+    "Ratio": {
+      "properties": {
+        "denominator": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Denominator"
+        },
+        "numerator": {
+          "discriminator": {
+            "mapping": {
+              "abs": "#/$defs/Absolute",
+              "add": "#/$defs/Sum",
+              "constant": "#/$defs/Constant",
+              "div": "#/$defs/Ratio",
+              "external": "#/$defs/ExternalMetric",
+              "fact_value": "#/$defs/FactValue",
+              "ledger_count": "#/$defs/LedgerCount",
+              "ledger_sum": "#/$defs/LedgerSum",
+              "max": "#/$defs/Largest",
+              "min": "#/$defs/Smallest",
+              "mul": "#/$defs/Product",
+              "sub": "#/$defs/Difference"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LedgerSum"
+            },
+            {
+              "$ref": "#/$defs/LedgerCount"
+            },
+            {
+              "$ref": "#/$defs/FactValue"
+            },
+            {
+              "$ref": "#/$defs/Constant"
+            },
+            {
+              "$ref": "#/$defs/ExternalMetric"
+            },
+            {
+              "$ref": "#/$defs/Sum"
+            },
+            {
+              "$ref": "#/$defs/Difference"
+            },
+            {
+              "$ref": "#/$defs/Product"
+            },
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "$ref": "#/$defs/Absolute"
+            },
+            {
+              "$ref": "#/$defs/Largest"
+            },
+            {
+              "$ref": "#/$defs/Smallest"
+            }
+          ],
+          "title": "Numerator"
+        },
+        "op": {
+          "const": "div",
+          "default": "div",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "title": "Ratio",
+      "type": "object"
+    },
+    "RelatedParty": {
+      "description": "Отбор по связанности контрагента.\n\nПорог связанности свой у каждого заёмщика и объявлен в его досье KYC, поэтому\nздесь стоит только намерение — конкретные контрагенты подставляются исполнителем\nиз фактов.",
+      "enum": [
+        "any",
+        "only",
+        "exclude"
+      ],
+      "title": "RelatedParty",
+      "type": "string"
+    },
+    "Resolution": {
+      "description": "Судьба требуемого факта после сверки с детерминированным слоем.",
+      "enum": [
+        "resolved",
+        "needs_resolution"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "Rounding": {
+      "enum": [
+        "half_up",
+        "half_even"
+      ],
+      "title": "Rounding",
+      "type": "string"
+    },
+    "RoundingSpec": {
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/Rounding",
+          "default": "half_up"
+        },
+        "scale": {
+          "default": 2,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Scale",
+          "type": "integer"
+        }
+      },
+      "title": "RoundingSpec",
+      "type": "object"
+    },
+    "Selector": {
+      "description": "Какие строки реестра попадают в величину.\n\nПустое поле означает «без ограничения по этому признаку», а не «ничего»: иначе\nлюбой селектор пришлось бы заполнять целиком, и ошибка компилятора выглядела бы\nкак осмысленный фильтр.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TransactionCategory"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "counterparties": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Counterparties",
+          "type": "array"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "default": "any"
+        },
+        "exclude_txn_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Txn Ids",
+          "type": "array"
+        },
+        "months": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 12,
+          "title": "Months",
+          "type": "array"
+        },
+        "related_party": {
+          "$ref": "#/$defs/RelatedParty",
+          "default": "any"
+        }
+      },
+      "title": "Selector",
+      "type": "object"
+    },
+    "Smallest": {
+      "properties": {
+        "op": {
+          "const": "min",
+          "default": "min",
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "abs": "#/$defs/Absolute",
+                "add": "#/$defs/Sum",
+                "constant": "#/$defs/Constant",
+                "div": "#/$defs/Ratio",
+                "external": "#/$defs/ExternalMetric",
+                "fact_value": "#/$defs/FactValue",
+                "ledger_count": "#/$defs/LedgerCount",
+                "ledger_sum": "#/$defs/LedgerSum",
+                "max": "#/$defs/Largest",
+                "min": "#/$defs/Smallest",
+                "mul": "#/$defs/Product",
+                "sub": "#/$defs/Difference"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LedgerSum"
+              },
+              {
+                "$ref": "#/$defs/LedgerCount"
+              },
+              {
+                "$ref": "#/$defs/FactValue"
+              },
+              {
+                "$ref": "#/$defs/Constant"
+              },
+              {
+                "$ref": "#/$defs/ExternalMetric"
+              },
+              {
+                "$ref": "#/$defs/Sum"
+              },
+              {
+                "$ref": "#/$defs/Difference"
+              },
+              {
+                "$ref": "#/$defs/Product"
+              },
+              {
+                "$ref": "#/$defs/Ratio"
+              },
+              {
+                "$ref": "#/$defs/Absolute"
+              },
+              {
+                "$ref": "#/$defs/Largest"
+              },
+              {
+                "$ref": "#/$defs/Smallest"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "title": "Smallest",
+      "type": "object"
+    },
+    "SourceAuthority": {
+      "description": "Можно ли опираться на документ при расчёте.\n\nПромежуточная ведомость аудитора и заменённая редакция договора читаются и\nхранятся, но менять по ним ответ нельзя. Разделение статуса документа и права\nна него опираться нужно потому, что второе зависит не только от самого\nдокумента: черновик перестаёт действовать, когда у того же заёмщика появился\nокончательный отчёт.",
+      "enum": [
+        "authoritative",
+        "recorded",
+        "ignored"
+      ],
+      "title": "SourceAuthority",
+      "type": "string"
+    },
+    "SourceRef": {
+      "description": "Адрес фрагмента в исходном документе.\n\nКаждое утверждение системы адресуется этой тройкой, и по ней же строится вырезка\nстраницы для карточки решения. Тип, статус и номер заключения носятся вместе с\nадресом: без них нельзя ответить, почему один вывод применён, а другой отклонён.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "authority": {
+          "$ref": "#/$defs/SourceAuthority",
+          "default": "recorded"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "file_hash": {
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "File Hash",
+          "type": "string"
+        },
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DocumentKind",
+          "default": "unrelated"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quote"
+        },
+        "report_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Report Number"
+        },
+        "status": {
+          "$ref": "#/$defs/DocumentStatus",
+          "default": "current"
+        }
+      },
+      "required": [
+        "file_hash",
+        "file_name",
+        "page"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "Sum": {
+      "properties": {
+        "op": {
+          "const": "add",
+          "default": "add",
+          "title": "Op",
+          "type": "string"
+        },
+        "terms": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "abs": "#/$defs/Absolute",
+                "add": "#/$defs/Sum",
+                "constant": "#/$defs/Constant",
+                "div": "#/$defs/Ratio",
+                "external": "#/$defs/ExternalMetric",
+                "fact_value": "#/$defs/FactValue",
+                "ledger_count": "#/$defs/LedgerCount",
+                "ledger_sum": "#/$defs/LedgerSum",
+                "max": "#/$defs/Largest",
+                "min": "#/$defs/Smallest",
+                "mul": "#/$defs/Product",
+                "sub": "#/$defs/Difference"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LedgerSum"
+              },
+              {
+                "$ref": "#/$defs/LedgerCount"
+              },
+              {
+                "$ref": "#/$defs/FactValue"
+              },
+              {
+                "$ref": "#/$defs/Constant"
+              },
+              {
+                "$ref": "#/$defs/ExternalMetric"
+              },
+              {
+                "$ref": "#/$defs/Sum"
+              },
+              {
+                "$ref": "#/$defs/Difference"
+              },
+              {
+                "$ref": "#/$defs/Product"
+              },
+              {
+                "$ref": "#/$defs/Ratio"
+              },
+              {
+                "$ref": "#/$defs/Absolute"
+              },
+              {
+                "$ref": "#/$defs/Largest"
+              },
+              {
+                "$ref": "#/$defs/Smallest"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Terms",
+          "type": "array"
+        }
+      },
+      "required": [
+        "terms"
+      ],
+      "title": "Sum",
+      "type": "object"
+    },
+    "TransactionCategory": {
+      "enum": [
+        "revenue",
+        "opex",
+        "capex",
+        "payroll",
+        "utilities",
+        "rent",
+        "taxes",
+        "interest_expense",
+        "insurance_premium",
+        "financing_inflow",
+        "other",
+        "unknown"
+      ],
+      "title": "TransactionCategory",
+      "type": "string"
+    },
+    "Unit": {
+      "enum": [
+        "money",
+        "ratio",
+        "percent",
+        "count",
+        "days"
+      ],
+      "title": "Unit",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Ответ модели на один документ: все пункты статьи о ковенантах.",
+  "properties": {
+    "clauses": {
+      "items": {
+        "$ref": "#/$defs/CompiledClause"
+      },
+      "minItems": 1,
+      "title": "Clauses",
+      "type": "array"
+    }
+  },
+  "required": [
+    "clauses"
+  ],
+  "title": "CompilerResponse",
+  "type": "object"
+}
