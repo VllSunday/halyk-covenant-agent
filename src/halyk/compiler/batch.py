@@ -51,6 +51,7 @@ from halyk.models.formula import (
     CovenantFormula,
     Difference,
     Direction,
+    FactValue,
     LedgerSum,
     Selector,
 )
@@ -213,6 +214,84 @@ def normalise_derived_metrics(
     return tuple(found)
 
 
+def _has_one_off_addback(value: Any) -> bool:
+    if isinstance(value, dict):
+        if value.get("op") == "fact_value" and value.get("above_one_off_policy") is True:
+            return True
+        return any(_has_one_off_addback(item) for item in value.values())
+    if isinstance(value, list | tuple):
+        return any(_has_one_off_addback(item) for item in value)
+    return False
+
+
+def _has_unfiltered_one_off(value: Any) -> bool:
+    if isinstance(value, dict):
+        if (
+            value.get("op") == "fact_value"
+            and value.get("fact_kind") == "one_off_item"
+            and value.get("above_one_off_policy") is not True
+            and value.get("description_contains") is None
+            and value.get("counterparty") is None
+        ):
+            return True
+        return any(_has_unfiltered_one_off(item) for item in value.values())
+    if isinstance(value, list | tuple):
+        return any(_has_unfiltered_one_off(item) for item in value)
+    return False
+
+
+def _include_one_off_base(value: Any) -> tuple[Any, bool]:
+    """Добавить все разовые расходы в правую часть первого revenue - OPEX."""
+    if isinstance(value, dict):
+        right = value.get("right")
+        if (
+            value.get("op") == "sub"
+            and isinstance(right, dict)
+            and right.get("op") == "ledger_sum"
+            and "opex" in right.get("selector", {}).get("categories", ())
+        ):
+            one_off = FactValue(fact_kind="one_off_item").model_dump(mode="python")
+            return value | {"right": {"op": "add", "terms": [right, one_off]}}, True
+        repaired: dict[str, Any] = {}
+        changed = False
+        for key, item in value.items():
+            if changed:
+                repaired[key] = item
+                continue
+            repaired[key], changed = _include_one_off_base(item)
+        return repaired, changed
+    if isinstance(value, list | tuple):
+        repaired_items: list[Any] = []
+        changed = False
+        for item in value:
+            if changed:
+                repaired_items.append(item)
+                continue
+            fixed, changed = _include_one_off_base(item)
+            repaired_items.append(fixed)
+        return type(value)(repaired_items), changed
+    return value, False
+
+
+def normalise_one_off_addbacks(
+    clauses: Sequence[CompiledClause],
+) -> tuple[CompiledClause, ...]:
+    """Собрать adjusted EBITDA без двойного add-back разовых расходов."""
+    found = []
+    for clause in clauses:
+        payload = clause.formula.model_dump(mode="python")
+        if not _has_one_off_addback(payload) or _has_unfiltered_one_off(payload):
+            found.append(clause)
+            continue
+        repaired, changed = _include_one_off_base(payload)
+        found.append(
+            clause.model_copy(update={"formula": CovenantFormula.model_validate(repaired)})
+            if changed
+            else clause
+        )
+    return tuple(found)
+
+
 def check_authority(clause: CompiledClause) -> list[CompilationError]:
     """Пункт читается из документа, на который вообще можно опираться.
 
@@ -353,6 +432,7 @@ class CovenantCompiler:
         response = CompilerResponse.model_validate(with_known_sources(payload, documents))
         clauses = normalise_periods(tuple(sorted(response.clauses, key=lambda clause: clause.cell)))
         clauses = normalise_derived_metrics(clauses, documents.values())
+        clauses = normalise_one_off_addbacks(clauses)
 
         errors = [*check_coverage(clauses, batch.cells), *check_period(clauses)]
         for clause in clauses:
