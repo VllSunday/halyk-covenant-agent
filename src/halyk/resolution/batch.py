@@ -161,7 +161,13 @@ class ResolutionResult:
         return tuple(sorted(refused | set(self.ambiguous)))
 
 
-def _source(evidence_file: str, page: int, documents: dict[str, DocumentFacts]) -> SourceRef:
+def source_ref(evidence_file: str, page: int, documents: dict[str, DocumentFacts]) -> SourceRef:
+    """Адрес утверждения, собранный из переписи по названному моделью файлу.
+
+    Публичная: тем же адресом подписывается величина, которую resolver дочитал, и
+    без общей сборки она пришла бы в расчёт с другим происхождением, чем
+    корректировка из того же абзаца.
+    """
     document = documents.get(evidence_file)
     if document is None:
         raise ValueError(f"файла {evidence_file} нет среди документов заёмщика")
@@ -210,7 +216,7 @@ def _adjustment(
     proposal: ProposedAdjustment, account_id: str, documents: dict[str, DocumentFacts]
 ) -> Adjustment:
     """Настоящая корректировка из предложенной. Обязательные поля задаёт действие."""
-    source = _source(proposal.evidence.file_name, proposal.evidence.page, documents)
+    source = source_ref(proposal.evidence.file_name, proposal.evidence.page, documents)
     common: dict[str, Any] = {
         "account_id": account_id,
         "selector": _selector(proposal),
