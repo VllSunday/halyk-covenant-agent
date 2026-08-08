@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from halyk.config import ModelConfig
 from halyk.hashing import sha256_payload
 from halyk.llm.cache import ModelCache
+from halyk.llm.runner import CHARS_PER_TOKEN, Budget
 from halyk.models.classification import TransactionCategory
 
 OUTPUT_CONTRACT = "transaction-category-4"
@@ -174,10 +175,15 @@ class BatchCall:
 
 @dataclass(slots=True)
 class CategoryClassifier:
-    """Модель плюс кэш по содержимому батча."""
+    """Модель плюс кэш по содержимому батча.
+
+    Бюджет необязателен, но в сквозном прогоне он тот же, что у компилятора: потолок
+    расходов один на прогон, и роль, считающая себя отдельно, обходит его целиком.
+    """
 
     config: ModelConfig
     cache: ModelCache
+    budget: Budget | None = None
     calls: list[BatchCall] = field(default_factory=list)
 
     @property
@@ -253,7 +259,14 @@ class CategoryClassifier:
             )
             return verdicts
 
+        # Разрешение спрашивается до сети, а не после: узнать о перерасходе
+        # постфактум — значит уже его допустить.
+        estimated = self._estimate(rows)
+        if self.budget is not None:
+            self.budget.authorise(estimated)
         payload, usage, request_id = self._ask(rows)
+        if self.budget is not None:
+            self.budget.record(usage[0], usage[1], estimated)
         verdicts = self._verdicts(payload["items"], rows)
         self.calls.append(
             BatchCall(
@@ -271,6 +284,11 @@ class CategoryClassifier:
         )
         self.cache.put(key, payload)
         return verdicts
+
+    def _estimate(self, rows: Sequence[TransactionInput]) -> int:
+        """Грубая оценка входных токенов до вызова. Точное число приходит потом."""
+        body = INSTRUCTIONS + json.dumps([row.payload() for row in rows], ensure_ascii=False)
+        return len(body) // CHARS_PER_TOKEN
 
     def _ask(
         self, rows: Sequence[TransactionInput]

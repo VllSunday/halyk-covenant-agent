@@ -18,7 +18,10 @@ from halyk.models.submission import Submission
 from halyk.output.explain import render_explanation
 from halyk.output.template import SubmissionTemplate
 from halyk.output.validator import validate_file
+from halyk.pipeline import PipelineError
 from halyk.pipeline import solve as run_pipeline
+from halyk.pipeline.dataset import DatasetError
+from halyk.pipeline.report import first_lines
 from halyk.run.context import LINEAGE_NAME, RunContext
 from halyk.run.trace import read_lineage
 
@@ -91,10 +94,19 @@ def version() -> None:
 @app.command()
 def solve(
     input_path: Annotated[Path, typer.Option("--input", exists=True, help="Архив с датасетом")],
-    output_path: Annotated[Path, typer.Option("--output", help="Куда записать ответ")] = Path(
-        "Submission.json"
-    ),
+    output_path: Annotated[
+        Path,
+        typer.Option("--output", help="Куда записать ответ; файл переписывается прогоном"),
+    ] = Path("Submission.json"),
     *,
+    template: Annotated[
+        Path | None,
+        typer.Option(
+            "--template",
+            exists=True,
+            help="Шаблон ответа; по умолчанию берётся из самого датасета",
+        ),
+    ] = None,
     resume: Annotated[
         str | None,
         typer.Option("--resume", help="Продолжить прогон с указанным run_id, используя его кэш"),
@@ -105,7 +117,10 @@ def solve(
     ] = None,
     cache_read: Annotated[
         bool,
-        typer.Option("--cache-read", help="Разрешить чтение кэша при новом прогоне"),
+        typer.Option(
+            "--cache-read",
+            help="Разрешить чтение кэша прогона; кэш лежит в его каталоге, см. --resume",
+        ),
     ] = False,
     offline: Annotated[
         bool,
@@ -120,6 +135,9 @@ def solve(
 
     По умолчанию считает вживую и кэш только пишет. Чтение кэша включается явно —
     иначе новый датасет мог бы получить ответы от прошлого прогона.
+
+    Прогон строгий: незакрытая ячейка заканчивается ненулевым кодом возврата и
+    отчётом, а не файлом ответа с пропусками.
     """
     if resume and replay:
         error_console.print("--resume и --replay вместе не имеют смысла")
@@ -132,12 +150,36 @@ def solve(
         input_path=input_path,
         mode=mode,
         run_id=resume or (replay.name if replay else None),
+        cache_read=cache_read,
     )
     if cache_read and mode is RunMode.SOLVE:
         console.print("[yellow]Чтение кэша включено вручную[/yellow]")
 
-    result = run_pipeline(context, input_path, output_path)
+    try:
+        result = run_pipeline(context, input_path, output_path, template_path=template)
+    except DatasetError as exc:
+        error_console.print(str(exc))
+        raise typer.Exit(code=2) from exc
+    except PipelineError as exc:
+        error_console.print(str(exc))
+        if exc.report is not None:
+            for line in first_lines(exc.report.problems):
+                error_console.print(f"  {line}")
+        raise typer.Exit(code=1) from exc
+
+    metrics = result.metrics
     console.print(f"Готово: {result.submission_path}")
+    console.print(
+        f"Ячеек {metrics.covenants_answered} из {metrics.covenants_found}, "
+        f"заёмщиков {metrics.borrowers_total}, операций {metrics.transactions_total}"
+    )
+    console.print(
+        f"Вызовов моделей {metrics.llm_calls} (живых {metrics.live_calls}, "
+        f"из кэша {metrics.cache_hits}), {metrics.runtime_seconds:.1f} c"
+    )
+    console.print(f"Артефакты прогона: {result.run_dir}")
+    for note in result.report.notes:
+        console.print(f"[yellow]{note.code}[/yellow] {note.subject}: {note.detail}")
 
 
 @app.command()

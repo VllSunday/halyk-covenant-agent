@@ -17,11 +17,15 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 
+from halyk.execution.executor import Outcome
 from halyk.ingest.inventory import DatasetInventory
 from halyk.knowledge.facts import FactSet
+from halyk.models.covenant import Operator
 from halyk.models.document import DocumentFacts, DocumentKind, DocumentStatus
+from halyk.models.lineage import InvariantCheck
 
 # Денежная сумма с копейками. Одиночное совпадение ничего не значит — оно попадается
 # и в регламенте, и в еженедельной сводке. Значима именно их плотность.
@@ -229,6 +233,38 @@ def check_coverage(answered: Sequence[str], expected: Sequence[str]) -> list[Vio
         )
         for cell in missing
     ]
+
+
+def check_answer(
+    outcome: Outcome, operator: Operator, threshold: Decimal
+) -> tuple[InvariantCheck, ...]:
+    """Проверки одной посчитанной ячейки. Идут в lineage вместе с ответом.
+
+    Все три ловят не арифметику, а рассогласование между частями ответа: числом,
+    вердиктом и уликой. Ошибка такого рода не видна ни в одной из них по отдельности —
+    ячейка выглядит заполненной, а объяснение указывает не туда.
+    """
+    actual, evidence = outcome.actual, outcome.evidence_txn_id
+    non_negative = actual is not None and actual >= 0
+    breached = outcome.triggered and actual is not None and not operator.holds(actual, threshold)
+    grounded = evidence is None or evidence in outcome.rows
+    return (
+        InvariantCheck(
+            name="actual_is_not_negative",
+            passed=non_negative,
+            detail=None if non_negative else f"actual = {actual}",
+        ),
+        InvariantCheck(
+            name="verdict_matches_threshold",
+            passed=actual is not None and (outcome.status == "BREACH") is breached,
+            detail=f"{actual} {operator.value} {threshold}, вердикт {outcome.status}",
+        ),
+        InvariantCheck(
+            name="evidence_belongs_to_calculation",
+            passed=grounded,
+            detail=None if grounded else f"{evidence} нет среди строк расчёта",
+        ),
+    )
 
 
 def summarise(violations: Sequence[Violation]) -> dict[str, object]:

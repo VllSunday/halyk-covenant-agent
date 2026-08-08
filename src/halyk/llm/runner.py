@@ -34,7 +34,7 @@ T = TypeVar("T")
 # Символов на токен. Оценка грубая и намеренно заниженная: она нужна до вызова,
 # чтобы не начать запрос, который выйдет за лимит, а точное число приходит потом от
 # провайдера и записывается в телеметрию.
-_CHARS_PER_TOKEN = 3
+CHARS_PER_TOKEN = 3
 
 # Ошибки, которые лечатся повтором того же запроса. Всё остальное — ошибка запроса
 # или контракта, и повторять её бессмысленно.
@@ -174,7 +174,7 @@ class Request:
 
     def estimated_input_tokens(self) -> int:
         body = self.instructions + json.dumps(self.payload, ensure_ascii=False, sort_keys=True)
-        return len(body) // _CHARS_PER_TOKEN
+        return len(body) // CHARS_PER_TOKEN
 
 
 Answer = tuple[dict[str, Any], tuple[int | None, int | None], str | None]
@@ -289,8 +289,10 @@ class StructuredModelRunner:
                 # у неё свой ключ и своё содержимое.
                 continue
 
-            payload, usage, request_id = self._ask(request, attempt)
+            # Отсчёт идёт до обращения наружу: задержка живого вызова — это в первую
+            # очередь ожидание ответа, и метрика без него мерила бы скорость разбора.
             started = time.perf_counter()
+            payload, usage, request_id = self._ask(request, attempt)
             parsed, note = self._parse(payload, parse)
             self._log(
                 request,
