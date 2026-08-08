@@ -413,6 +413,15 @@ def test_contributing_row_is_not_evidence() -> None:
     assert result.evidence_txn_id is None
 
 
+def test_adjusted_counterfactual_has_priority_over_ordinary_rows() -> None:
+    adjusted = txn("T1", "-600", Cat.CAPEX).model_copy(update={"adjustments": ("A1",)})
+    result = executor(adjusted, txn("T2", "-600", Cat.CAPEX)).run(
+        formula(threshold=Constant(value=Decimal("1000")))
+    )
+    assert result.status == "BREACH"
+    assert result.evidence_txn_id == "T1"
+
+
 def test_no_evidence_when_nothing_flips_the_verdict() -> None:
     result = executor(
         txn("T1", "-5000", Cat.CAPEX),

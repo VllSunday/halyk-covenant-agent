@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from functools import partial
 from typing import Any
@@ -38,6 +39,7 @@ from halyk.compiler.validator import (
     validate,
 )
 from halyk.knowledge.authority import resolve_authority
+from halyk.knowledge.errata import ErrataRegistry
 from halyk.llm.documents import index, own_documents, render, source_hashes
 from halyk.llm.runner import Request, Role, StructuredModelRunner
 from halyk.llm.schema import strict_schema
@@ -123,6 +125,20 @@ class CompilationResult:
     @property
     def open_requirements(self) -> tuple[FactRequirement, ...]:
         return tuple(item for clause in self.clauses for item in clause.open_requirements)
+
+
+def normalise_periods(clauses: Sequence[CompiledClause]) -> tuple[CompiledClause, ...]:
+    """Снять одиночную ошибку периода по большинству пунктов одного договора."""
+    if not clauses:
+        return ()
+    counts = Counter((clause.period_start, clause.period_end) for clause in clauses)
+    period, votes = counts.most_common(1)[0]
+    if votes <= len(clauses) // 2:
+        return tuple(clauses)
+    start, end = period
+    return tuple(
+        clause.model_copy(update={"period_start": start, "period_end": end}) for clause in clauses
+    )
 
 
 def check_authority(clause: CompiledClause) -> list[CompilationError]:
@@ -224,6 +240,7 @@ class CovenantCompiler:
     """
 
     runner: StructuredModelRunner
+    errata: ErrataRegistry = field(default_factory=ErrataRegistry.load)
 
     def compile(self, batch: CompilerBatch, facts: Sequence[Fact] = ()) -> CompilationResult:
         """Скомпилировать пункты заёмщика и отметить, каких величин им не хватает."""
@@ -231,6 +248,10 @@ class CovenantCompiler:
         clauses = self.runner.run(
             self.request(batch),
             partial(self._parse, batch=batch, documents=documents),
+        )
+        clauses = tuple(
+            clause.model_copy(update={"formula": self.errata.apply_formula(clause.formula)[0]})
+            for clause in clauses
         )
         # Разрешение требований детерминировано и от ответа модели не зависит, поэтому
         # делается после разбора: иначе оно повторялось бы на каждой попытке и меняло
@@ -258,7 +279,7 @@ class CovenantCompiler:
         payload: dict[str, Any], *, batch: CompilerBatch, documents: dict[str, DocumentFacts]
     ) -> tuple[CompiledClause, ...]:
         response = CompilerResponse.model_validate(with_known_sources(payload, documents))
-        clauses = tuple(sorted(response.clauses, key=lambda clause: clause.cell))
+        clauses = normalise_periods(tuple(sorted(response.clauses, key=lambda clause: clause.cell)))
 
         errors = [*check_coverage(clauses, batch.cells), *check_period(clauses)]
         for clause in clauses:

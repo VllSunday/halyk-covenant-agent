@@ -512,6 +512,19 @@ class Executor:
                 continue
             if not probe.breached:
                 culprits.append(txn_id)
+        # Если документ изменил строку и именно после этого она стала причиной
+        # нарушения, это более сильная улика, чем прочие математически возможные
+        # контрфактики. Так аудиторская переклассификация не теряется среди крупных
+        # обычных строк знаменателя.
+        adjusted = [
+            txn_id
+            for txn_id in culprits
+            if (transaction := next((t for t in self.transactions if t.txn_id == txn_id), None))
+            is not None
+            and transaction.is_adjusted
+        ]
+        if len(adjusted) == 1:
+            return adjusted[0]
         return culprits[0] if len(culprits) == 1 else None
 
 

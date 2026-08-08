@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 
 from halyk.hashing import sha256_file
 from halyk.models.covenant import CovenantIR
+from halyk.models.formula import Constant, CovenantFormula
 
 # Реестр лежит внутри пакета, а не рядом с рабочим каталогом: относительный путь
 # зависел бы от того, откуда запущена команда, и при запуске из другого каталога
@@ -141,6 +142,37 @@ class ErrataRegistry:
                     update={"threshold": erratum.corrected_value}
                 )
             }
+        )
+        return corrected, ErratumApplication(
+            erratum_id=erratum.id,
+            field=erratum.field,
+            documented_value=documented,
+            applied_value=erratum.corrected_value,
+            reason=erratum.reason,
+            source=erratum.source,
+        )
+
+    def apply_formula(
+        self, formula: CovenantFormula
+    ) -> tuple[CovenantFormula, ErratumApplication | None]:
+        """Наложить то же официальное исправление на исполняемый Formula AST."""
+        erratum = self.for_covenant(formula.scenario_id, formula.clause_id)
+        if erratum is None:
+            return formula, None
+        if not isinstance(formula.threshold, Constant):
+            raise ErrataError(
+                f"{erratum.id}: порог {formula.scenario_id}/{formula.clause_id} "
+                "не является константой"
+            )
+        documented = formula.threshold.value
+        if documented != erratum.documented_value:
+            raise ErrataError(
+                f"{erratum.id}: в {formula.scenario_id}/{formula.clause_id} ожидался порог "
+                f"{erratum.documented_value}, а из документа пришёл {documented}. "
+                "Исправление не применено."
+            )
+        corrected = formula.model_copy(
+            update={"threshold": Constant(value=erratum.corrected_value)}
         )
         return corrected, ErratumApplication(
             erratum_id=erratum.id,

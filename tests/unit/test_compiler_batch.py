@@ -19,6 +19,7 @@ from halyk.compiler.batch import (
     CovenantCompiler,
     check_authority,
     check_period,
+    normalise_periods,
 )
 from halyk.compiler.contract import (
     CompiledClause,
@@ -372,6 +373,18 @@ def test_documents_of_another_dataset_miss_the_cache(tmp_path: Path) -> None:
 def test_clauses_of_one_borrower_share_the_period() -> None:
     other = clause("6.2", quote=QUOTE_62, page=2, period=(date(2024, 1, 1), date(2024, 12, 31)))
     assert [error.code for error in check_period([clause(), other])] == ["period_is_inconsistent"]
+
+
+def test_single_period_outlier_is_normalised_by_majority() -> None:
+    outlier = clause("6.3", period=(date(2024, 1, 1), date(2024, 12, 31)))
+    clauses = normalise_periods((clause("6.1"), clause("6.2"), outlier))
+    assert {(item.period_start, item.period_end) for item in clauses} == {PERIOD}
+
+
+def test_periods_without_a_majority_stay_inconsistent() -> None:
+    other = clause("6.2", period=(date(2024, 1, 1), date(2024, 12, 31)))
+    clauses = normalise_periods((clause("6.1"), other))
+    assert [error.code for error in check_period(clauses)] == ["period_is_inconsistent"]
 
 
 def test_inconsistent_period_is_not_compiled(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from halyk.knowledge.errata import ErrataError, ErrataRegistry
+from halyk.models.classification import TransactionCategory
 from halyk.models.covenant import (
     Aggregation,
     Comparison,
@@ -16,6 +17,7 @@ from halyk.models.covenant import (
     Period,
     Unit,
 )
+from halyk.models.formula import Constant, CovenantFormula, LedgerSum, Selector
 from halyk.models.source import SourceRef
 
 SOURCE = SourceRef(file_hash="a" * 64, file_name="agreement.pdf", page=5)
@@ -78,6 +80,25 @@ def test_threshold_of_p4_is_corrected(registry: ErrataRegistry) -> None:
     assert applied is not None
     assert applied.documented_value == Decimal("0.04")
     assert applied.erratum_id == "E-001"
+
+
+def test_threshold_is_also_corrected_in_formula_ast(registry: ErrataRegistry) -> None:
+    formula = CovenantFormula(
+        scenario_id="P4",
+        clause_id="6.3",
+        title="related parties",
+        measure=LedgerSum(selector=Selector(categories=(TransactionCategory.REVENUE,))),
+        operator=Operator.LE,
+        threshold=Constant(value=Decimal("0.04")),
+        unit=Unit.RATIO,
+        source_refs=(SOURCE,),
+        quote="0.04x",
+        confidence=1,
+    )
+    corrected, applied = registry.apply_formula(formula)
+    assert isinstance(corrected.threshold, Constant)
+    assert corrected.threshold.value == Decimal("0.045")
+    assert applied is not None and applied.erratum_id == "E-001"
 
 
 def test_application_keeps_both_values_for_the_lineage(registry: ErrataRegistry) -> None:

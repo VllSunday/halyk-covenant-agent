@@ -22,7 +22,10 @@ from halyk.compiler.validator import (
     ALLOWED_OPS,
     check_coverage,
     check_ledger_measures,
+    check_one_off_addbacks,
     check_requirements,
+    check_threshold_form,
+    check_unresolved_terms,
     resolve_requirements,
     validate,
 )
@@ -169,6 +172,16 @@ def test_quote_survives_line_breaks() -> None:
     assert "quote_is_not_found" not in run(clause(), documents=documents)
 
 
+def test_quote_may_be_supported_by_one_of_several_sources() -> None:
+    support = document("support.pdf").model_copy(
+        update={"pages": (PageFacts(number=3, text="дополнительное определение", char_count=25),)}
+    )
+    item = clause(formula={"source_refs": (source(), source(name="support.pdf"))})
+    assert "quote_is_not_found" not in run(
+        item, documents={"agreement.pdf": document(), "support.pdf": support}
+    )
+
+
 def test_wrong_page_is_rejected() -> None:
     assert "page_is_missing" in run(clause(formula={"source_refs": (source(page=7),)}))
 
@@ -312,6 +325,58 @@ def test_document_only_borrower_fact_remains_allowed() -> None:
     assert check_ledger_measures(item) == []
 
 
+def test_variable_threshold_is_rejected_in_favour_of_normalised_measure() -> None:
+    item = clause(
+        formula={
+            "threshold": ast.Product(
+                factors=(
+                    Constant(value=Decimal("0.03")),
+                    LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
+                )
+            )
+        }
+    )
+    assert codes(check_threshold_form(item)) == {"threshold_is_not_constant"}
+
+
+def test_addback_requires_all_one_off_items_in_the_base() -> None:
+    item = clause(
+        formula={
+            "measure": ast.Sum(
+                terms=(
+                    LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
+                    FactValue(
+                        fact_kind="one_off_item",
+                        description_contains="large item",
+                        above_one_off_policy=True,
+                    ),
+                )
+            )
+        },
+        required_facts=(need("one_off_item"),),
+    )
+    assert codes(check_one_off_addbacks(item)) == {"one_off_base_is_missing"}
+
+
+def test_addback_passes_when_unfiltered_one_off_base_is_present() -> None:
+    item = clause(
+        formula={
+            "measure": ast.Sum(
+                terms=(
+                    FactValue(fact_kind="one_off_item"),
+                    FactValue(
+                        fact_kind="one_off_item",
+                        description_contains="large item",
+                        above_one_off_policy=True,
+                    ),
+                )
+            )
+        },
+        required_facts=(need("one_off_item"),),
+    )
+    assert check_one_off_addbacks(item) == []
+
+
 # --- разрешение требований ----------------------------------------------------
 
 
@@ -342,6 +407,11 @@ def test_unresolved_terms_are_carried() -> None:
     """То, что модель не смогла перевести, обязано доехать до отчёта."""
     item = clause(unresolved_terms=("средневзвешенная стоимость капитала",))
     assert item.unresolved_terms == ("средневзвешенная стоимость капитала",)
+
+
+def test_unresolved_terms_trigger_semantic_retry() -> None:
+    item = clause(unresolved_terms=("Определение EBITDA Заёмщика",))
+    assert codes(check_unresolved_terms(item)) == {"clause_has_unresolved_terms"}
 
 
 # --- размерности --------------------------------------------------------------

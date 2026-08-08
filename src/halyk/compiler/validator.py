@@ -22,6 +22,7 @@ from halyk.models.document import DocumentFacts, DocumentStatus
 from halyk.models.fact import Fact, Scope
 from halyk.models.formula import (
     Condition,
+    Constant,
     ExternalMetric,
     FactValue,
     LedgerCount,
@@ -165,6 +166,7 @@ def check_quote(
     пересказавшая пункт своими словами, здесь и останавливается.
     """
     found: list[CompilationError] = []
+    quote_found = False
     for index, ref in enumerate(clause.formula.source_refs):
         path = f"source_refs[{index}]"
         document = documents.get(ref.file_name)
@@ -187,14 +189,17 @@ def check_quote(
                 )
             )
             continue
-        if not contains_quote(pages[0].text, clause.formula.quote):
-            found.append(
-                CompilationError(
-                    code="quote_is_not_found",
-                    path=path,
-                    detail=f"цитаты нет на странице {ref.page} файла {ref.file_name}",
-                )
+        quote_found = quote_found or contains_quote(pages[0].text, clause.formula.quote)
+    if not quote_found and not any(
+        error.code in {"source_is_unknown", "page_is_missing"} for error in found
+    ):
+        found.append(
+            CompilationError(
+                code="quote_is_not_found",
+                path="source_refs",
+                detail="цитаты нет ни в одном из заявленных источников",
             )
+        )
     return found
 
 
@@ -322,6 +327,59 @@ def check_ledger_measures(clause: CompiledClause) -> list[CompilationError]:
     ]
 
 
+def check_threshold_form(clause: CompiledClause) -> list[CompilationError]:
+    """В ответ идёт нормированный показатель, поэтому порог обязан быть константой."""
+    if isinstance(clause.formula.threshold, Constant):
+        return []
+    return [
+        CompilationError(
+            code="threshold_is_not_constant",
+            path="threshold",
+            detail=(
+                "перенеси переменную часть порога в measure: например X <= 0.03 * revenue "
+                "запиши как X / revenue <= 0.03"
+            ),
+        )
+    ]
+
+
+def check_one_off_addbacks(clause: CompiledClause) -> list[CompilationError]:
+    """Add-back допустим лишь после включения всех разовых расходов в базовую EBITDA."""
+    facts = [node for _, node in _nodes(clause) if isinstance(node, FactValue)]
+    if not any(node.above_one_off_policy for node in facts):
+        return []
+    if any(
+        node.fact_kind == "one_off_item"
+        and not node.above_one_off_policy
+        and node.description_contains is None
+        and node.counterparty is None
+        for node in facts
+    ):
+        return []
+    return [
+        CompilationError(
+            code="one_off_base_is_missing",
+            path="measure",
+            detail=(
+                "скорректированная EBITDA должна сначала вычесть все one_off_item, "
+                "а затем прибавить обратно только статьи выше порога существенности"
+            ),
+        )
+    ]
+
+
+def check_unresolved_terms(clause: CompiledClause) -> list[CompilationError]:
+    """Незавершённая формула должна попасть в semantic retry, а не в расчёт."""
+    return [
+        CompilationError(
+            code="clause_has_unresolved_terms",
+            path="unresolved_terms",
+            detail=(f"разверни определение в AST или явно докажи, что оно невыразимо: {term}"),
+        )
+        for term in clause.unresolved_terms
+    ]
+
+
 def candidates(requirement: FactRequirement, facts: Iterable[Fact]) -> list[Fact]:
     """Факты, удовлетворяющие требованию целиком.
 
@@ -403,6 +461,9 @@ def validate(
         *check_units(clause),
         *check_requirements(clause),
         *check_ledger_measures(clause),
+        *check_threshold_form(clause),
+        *check_one_off_addbacks(clause),
+        *check_unresolved_terms(clause),
         *[
             CompilationError(code="dimension_mismatch", path=error.path, detail=error.detail)
             for error in check_dimensions(clause)
