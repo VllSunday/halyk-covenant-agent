@@ -45,6 +45,7 @@ from halyk.models.formula import (
     FactValue,
     LedgerSum,
     Selector,
+    Sum,
 )
 from halyk.models.source import SourceRef
 from halyk.money import Currency, Money
@@ -417,6 +418,52 @@ def test_explicitly_disclosed_ebitda_remains_a_document_fact() -> None:
     normalised = normalise_derived_metrics((item,), (document(), notes))[0]
     assert isinstance(normalised.formula.measure, FactValue)
     assert normalised.required_facts == (item.required_facts[0],)
+
+
+def test_inline_ebitda_does_not_double_count_detailed_expenses() -> None:
+    detailed = Difference(
+        left=LedgerSum(selector=Selector(categories=(Cat.REVENUE,), direction=Direction.INFLOW)),
+        right=Sum(
+            terms=(
+                LedgerSum(selector=Selector(categories=(Cat.OPEX,), direction=Direction.OUTFLOW)),
+                LedgerSum(
+                    selector=Selector(categories=(Cat.PAYROLL,), direction=Direction.OUTFLOW)
+                ),
+            )
+        ),
+    )
+    item = clause(measure=detailed).model_copy(
+        update={
+            "formula": clause(measure=detailed).formula.model_copy(
+                update={"title": "Нагрузка к EBITDA"}
+            )
+        }
+    )
+
+    normalised = normalise_derived_metrics((item,), (document(),))[0]
+
+    assert isinstance(normalised.formula.measure, Difference)
+    assert isinstance(normalised.formula.measure.right, LedgerSum)
+    assert normalised.formula.measure.right.selector.categories == (Cat.OPEX,)
+
+
+def test_non_ebitda_difference_is_not_rewritten() -> None:
+    detailed = Difference(
+        left=LedgerSum(selector=Selector(categories=(Cat.REVENUE,), direction=Direction.INFLOW)),
+        right=Sum(
+            terms=(
+                LedgerSum(selector=Selector(categories=(Cat.OPEX,), direction=Direction.OUTFLOW)),
+                LedgerSum(
+                    selector=Selector(categories=(Cat.PAYROLL,), direction=Direction.OUTFLOW)
+                ),
+            )
+        ),
+    )
+    item = clause(measure=detailed)
+
+    normalised = normalise_derived_metrics((item,), (document(),))[0]
+
+    assert normalised.formula.measure == detailed
 
 
 def test_inconsistent_period_is_not_compiled(tmp_path: Path) -> None:

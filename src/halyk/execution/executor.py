@@ -361,6 +361,13 @@ class Executor:
             )
         total = Decimal(0)
         used: set[str] = set()
+        resolved_candidates = tuple(
+            fact
+            for fact in self.facts
+            if isinstance(fact, ResolvedMetricFact)
+            and fact.metric_name == node.fact_kind
+            and (not node.counterparty or fact.counterparty == node.counterparty)
+        )
         for fact in self.facts:
             if fact.metric_name != node.fact_kind:
                 continue
@@ -368,7 +375,12 @@ class Executor:
             # отрицательной, и модуль превратил бы убыток в прибыль. У разовых статей
             # наоборот — там знак несёт направление платежа, и его снимает abs.
             if isinstance(fact, ResolvedMetricFact):
-                if not _description_matches(node.description_contains, fact.description):
+                # Вид величины и квалификаторы уже проверены при закрытии requirement.
+                # Текст нужен только для разведения нескольких величин одного вида:
+                # resolver вправе процитировать более полное название, чем узел AST.
+                if len(resolved_candidates) != 1 and not _description_matches(
+                    node.description_contains, fact.description
+                ):
                     continue
                 if node.counterparty and fact.counterparty != node.counterparty:
                     continue

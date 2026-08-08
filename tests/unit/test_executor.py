@@ -130,6 +130,36 @@ def test_resolved_fact_description_matches_case_and_unicode_spacing() -> None:
     assert result.status == "COMPLIANT"
 
 
+def test_single_resolved_metric_uses_verified_requirement_not_model_wording() -> None:
+    engine = Executor(
+        account_id=ACCOUNT,
+        transactions=(),
+        facts=(
+            resolved_metric(
+                "Совокупное обязательство Заёмщика по любой программе выходных пособий"
+            ).model_copy(
+                update={
+                    "metric": "severance_program_obligation",
+                    "value": Decimal("918447.52"),
+                }
+            ),
+        ),
+    )
+
+    result = engine.run(
+        formula(
+            measure=FactValue(
+                fact_kind="severance_program_obligation",
+                description_contains="совокупное обязательство по программе выходных пособий",
+            ),
+            threshold=Constant(value=Decimal("1000000")),
+        )
+    )
+
+    assert result.actual == Decimal("918447.52")
+    assert result.status == "COMPLIANT"
+
+
 def test_sum_takes_the_absolute_value() -> None:
     """Расходы в реестре отрицательны, а actual по условию всегда положителен."""
     result = executor(txn("T1", "-1000.50", Cat.CAPEX), txn("T2", "-2000.25", Cat.CAPEX)).run(

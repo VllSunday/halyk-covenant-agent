@@ -78,6 +78,16 @@ _DISCLOSED_EBITDA = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_EBITDA_WORD = re.compile(r"\bEBITDA\b", re.IGNORECASE)
+_EBITDA_DETAIL_CATEGORIES = {
+    TransactionCategory.OPEX.value,
+    TransactionCategory.PAYROLL.value,
+    TransactionCategory.UTILITIES.value,
+    TransactionCategory.RENT.value,
+    TransactionCategory.INSURANCE_PREMIUM.value,
+}
+_MIN_INLINE_EBITDA_TERMS = 2
+
 
 class ClauseRejectedError(ValueError):
     """Ответ компилятора не прошёл проверку. Причины — списком, с адресами узлов."""
@@ -200,6 +210,70 @@ def _expand_ebitda(value: Any) -> Any:
     return value
 
 
+def _single_category_sum(value: Any, category: str, direction: str) -> bool:
+    if not isinstance(value, dict) or value.get("op") != "ledger_sum":
+        return False
+    selector = value.get("selector")
+    return (
+        isinstance(selector, dict)
+        and selector.get("categories") == [category]
+        and selector.get("direction") == direction
+    )
+
+
+def _outflow_category(value: Any) -> str | None:
+    if not isinstance(value, dict) or value.get("op") != "ledger_sum":
+        return None
+    selector = value.get("selector")
+    if not isinstance(selector, dict):
+        return None
+    categories = selector.get("categories")
+    if (
+        not isinstance(categories, list)
+        or len(categories) != 1
+        or not isinstance(categories[0], str)
+        or selector.get("direction") != Direction.OUTFLOW.value
+    ):
+        return None
+    return categories[0]
+
+
+def _collapse_inline_ebitda(value: Any) -> Any:
+    """Свести ошибочно детализированную EBITDA к строкам REVENUE минус OPEX."""
+    if isinstance(value, list | tuple):
+        return type(value)(_collapse_inline_ebitda(item) for item in value)
+    if not isinstance(value, dict):
+        return value
+
+    repaired = {key: _collapse_inline_ebitda(item) for key, item in value.items()}
+    right = repaired.get("right")
+    terms = right.get("terms") if isinstance(right, dict) and right.get("op") == "add" else None
+    is_candidate = (
+        repaired.get("op") == "sub"
+        and _single_category_sum(
+            repaired.get("left"), TransactionCategory.REVENUE.value, Direction.INFLOW.value
+        )
+        and isinstance(terms, list)
+        and len(terms) >= _MIN_INLINE_EBITDA_TERMS
+    )
+    if not is_candidate or not isinstance(terms, list):
+        return repaired
+
+    categories = [_outflow_category(term) for term in terms]
+    opex = [
+        term
+        for term in terms
+        if _single_category_sum(term, TransactionCategory.OPEX.value, Direction.OUTFLOW.value)
+    ]
+    if (
+        None not in categories
+        and not set(categories) - _EBITDA_DETAIL_CATEGORIES
+        and len(opex) == 1
+    ):
+        repaired["right"] = opex[0]
+    return repaired
+
+
 def normalise_derived_metrics(
     clauses: Sequence[CompiledClause], documents: Iterable[DocumentFacts]
 ) -> tuple[CompiledClause, ...]:
@@ -208,13 +282,15 @@ def normalise_derived_metrics(
         return tuple(clauses)
     found = []
     for clause in clauses:
+        formula_payload = clause.formula.model_dump(mode="json")
+        if _EBITDA_WORD.search(f"{clause.formula.title} {clause.formula.quote}"):
+            formula_payload = _collapse_inline_ebitda(formula_payload)
         kinds = {item.fact_kind.casefold() for item in clause.required_facts}
         if not kinds.intersection({"ebitda", "borrower_ebitda"}):
-            found.append(clause)
+            formula = CovenantFormula.model_validate(formula_payload)
+            found.append(clause.model_copy(update={"formula": formula}))
             continue
-        formula = CovenantFormula.model_validate(
-            _expand_ebitda(clause.formula.model_dump(mode="python"))
-        )
+        formula = CovenantFormula.model_validate(_expand_ebitda(formula_payload))
         requirements = tuple(
             item
             for item in clause.required_facts

@@ -188,3 +188,11 @@ class ModelCache:
         )
         if self.journal is not None:
             self.journal.record(self.role, key, response, reused=False)
+
+    def alias(self, source_key: str, target_key: str) -> None:
+        """Сохранить успешный ответ под воспроизводимым альтернативным ключом."""
+        source = self._path(source_key)
+        if not source.exists():
+            raise FileNotFoundError(source)
+        target = self._path(target_key)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")

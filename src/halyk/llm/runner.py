@@ -27,7 +27,7 @@ from typing import Any, Protocol, TypeVar
 
 from halyk.config import ModelConfig
 from halyk.hashing import sha256_payload
-from halyk.llm.cache import ModelCache
+from halyk.llm.cache import CacheMissError, ModelCache
 
 T = TypeVar("T")
 EscalationReason = Callable[[T], str | None]
@@ -44,6 +44,7 @@ _SEMANTIC_RETRY_INSTRUCTION = (
     "\n\nПредыдущий ответ не прошёл автоматическую проверку. Исправь указанную "
     "ошибку и верни ответ строго по схеме, без пояснений вокруг него."
 )
+_INVALID_PRIMARY_REASON = "основная модель не смогла выдать валидный ответ"
 
 
 class Role(StrEnum):
@@ -615,10 +616,17 @@ class CascadingModelRunner:
         escalate_if: EscalationReason[T] | None = None,
     ) -> T:
         reason: str | None
+        stable_alias = False
         try:
             result = self.primary.run(request, parse)
         except InvalidResponseError as exc:
-            reason = f"основная модель не смогла выдать валидный ответ: {exc}"
+            reason = f"{_INVALID_PRIMARY_REASON}: {exc}"
+            stable_alias = True
+        except CacheMissError:
+            # В offline/replay отсутствие primary допустимо, если холодный прогон
+            # дошёл до fallback. Его стабильный ключ обязан воспроизводиться без
+            # не сохранённого текста невалидного ответа основной модели.
+            reason = _INVALID_PRIMARY_REASON
         else:
             reason = escalate_if(result) if escalate_if is not None else None
             if reason is None:
@@ -632,7 +640,21 @@ class CascadingModelRunner:
                 + f"Исправь причину отказа: {reason}"
             ),
         )
-        return self.fallback.run(escalated, parse)
+        result = self.fallback.run(escalated, parse)
+        if stable_alias:
+            stable = replace(
+                request,
+                instructions=(
+                    request.instructions
+                    + "\n\nОсновная модель не завершила задачу. "
+                    + f"Исправь причину отказа: {_INVALID_PRIMARY_REASON}"
+                ),
+            )
+            self.fallback.cache.alias(
+                self.fallback.key(escalated, attempt=1),
+                self.fallback.key(stable, attempt=1),
+            )
+        return result
 
     def usage(self) -> dict[str, Any]:
         live = [call for call in self.calls if not call.cache_hit]

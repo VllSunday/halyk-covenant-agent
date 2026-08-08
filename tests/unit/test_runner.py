@@ -362,8 +362,28 @@ def test_semantic_failure_escalates_to_fallback_model(tmp_path: Path) -> None:
 
     assert cascade.run(request(), parse) == 42
     assert [call.model for call in cascade.calls] == ["gpt-5.6-terra", "gpt-5.6-sol"]
-    assert "последняя причина" in fallback_responder.requests[0].instructions
+    assert (
+        "основная модель не смогла выдать валидный ответ"
+        in fallback_responder.requests[0].instructions
+    )
     assert "KeyError" in fallback_responder.requests[0].instructions
+
+
+def test_offline_primary_miss_replays_stable_fallback(tmp_path: Path) -> None:
+    primary = runner(tmp_path / "primary", responder=Responder({"wrong": 1}))
+    fallback = runner(tmp_path / "fallback", responder=Responder({"value": 42}))
+    primary.semantic_attempts = 1
+    primary.config = replace(primary.config, name="gpt-5.6-terra")
+    fallback.config = replace(fallback.config, name="gpt-5.6-sol")
+    cascade = CascadingModelRunner(primary, fallback)
+
+    assert cascade.run(request(), parse) == 42
+
+    primary.cache.policy = CachePolicy.OFFLINE
+    fallback.cache.policy = CachePolicy.OFFLINE
+    replay = CascadingModelRunner(primary, fallback)
+    assert replay.run(request(), parse) == 42
+    assert replay.fallback.calls[-1].cache_hit
 
 
 def test_valid_but_incomplete_answer_escalates_to_fallback_model(tmp_path: Path) -> None:
