@@ -28,6 +28,7 @@ from halyk.models.fact import (
     OneOffItemFact,
     OneOffPolicyFact,
     PpeRollForwardFact,
+    ResolvedMetricFact,
 )
 from halyk.models.formula import (
     Absolute,
@@ -348,7 +349,18 @@ class Executor:
         total = Decimal(0)
         used: set[str] = set()
         for fact in self.facts:
-            if fact.kind != node.fact_kind:
+            if fact.metric_name != node.fact_kind:
+                continue
+            # Дочитанная величина приходит со знаком и без пересчёта: EBITDA бывает
+            # отрицательной, и модуль превратил бы убыток в прибыль. У разовых статей
+            # наоборот — там знак несёт направление платежа, и его снимает abs.
+            if isinstance(fact, ResolvedMetricFact):
+                if node.description_contains and node.description_contains not in fact.description:
+                    continue
+                if node.counterparty and fact.counterparty != node.counterparty:
+                    continue
+                total += fact.value
+                used.add(f"{fact.metric}:{fact.requirement_id}")
                 continue
             # Движение основных средств входит в формулу выведенной величиной:
             # отдельной строки капитальных затрат в отчётности нет, она получается

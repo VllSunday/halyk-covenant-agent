@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -16,8 +17,24 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from halyk.knowledge.kyc import RelatedPartyPolicy
+from halyk.models.covenant import Unit
 from halyk.models.source import SourceRef
-from halyk.money import Money
+from halyk.money import Currency, Money
+
+
+class Scope(StrEnum):
+    """Чья это величина.
+
+    У P5/6.1 числитель считается по консолидированной отчётности материнской компании,
+    а знаменатель — по собственной отчётности заёмщика. Смешать их значит получить
+    правдоподобное число не про то.
+
+    Живёт рядом с фактом, а не рядом с требованием: требование объявляет область,
+    найденная величина её носит, и общее у них — только этот перечень.
+    """
+
+    BORROWER = "borrower"
+    GROUP = "group"
 
 
 class FactKind(StrEnum):
@@ -28,6 +45,9 @@ class FactKind(StrEnum):
     AGGREGATE_OBLIGATION = "aggregate_obligation"
     FX_SETTLEMENT = "fx_settlement"
     PPE_ROLL_FORWARD = "ppe_roll_forward"
+    # Величина, у которой своего разбора нет. Вид ей назначает компилятор, а находит
+    # её resolver — см. ResolvedMetricFact.
+    RESOLVED_METRIC = "resolved_metric"
 
 
 class Share(BaseModel):
@@ -52,6 +72,17 @@ class FactBase(BaseModel):
 
     account_id: str
     source: SourceRef
+
+    @property
+    def metric_name(self) -> str:
+        """Вид величины, на который отвечает факт.
+
+        У специализированных фактов это их собственный тип: разовая статья закрывает
+        требование про разовую статью. У дочитанной величины вид назначает компилятор,
+        и совпадать с типом факта он не обязан — иначе каждый новый показатель
+        требовал бы своей модели.
+        """
+        return str(getattr(self, "kind", ""))
 
     def record(self) -> dict[str, Any]:
         """Строка для JSONL-артефакта."""
@@ -164,6 +195,75 @@ class PpeRollForwardFact(FactBase):
         )
 
 
+class DerivedTerm(BaseModel):
+    """Одно раскрытое число, вошедшее в выведенную величину."""
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    amount: Decimal
+    source: SourceRef
+
+
+class Qualifier(BaseModel):
+    """Уточнение отбора внутри вида величины: контрагент, сегмент, валюта расчёта.
+
+    Пары «имя — значение», а не поля модели: набор уточнений задаёт компилятор в
+    требовании, и заводить под каждое своё поле значило бы менять контракт данных
+    ради нового ковенанта.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    value: str
+
+
+class ResolvedMetricFact(FactBase):
+    """Величина, дочитанная под требование компилятора.
+
+    Существует затем, чтобы новый показатель не требовал новой модели факта. Разбор
+    специализированных величин никуда не делся и идёт первым: сюда попадает только то,
+    что детерминированный слой не закрыл и что назвал сам компилятор.
+
+    Все проверки уже пройдены к моменту создания: требование известно, документ вправе
+    менять расчёт, размерность совпала, цитата найдена на заявленной странице. Здесь
+    хранится результат вместе с тем, из чего он получен.
+    """
+
+    kind: Literal[FactKind.RESOLVED_METRIC] = FactKind.RESOLVED_METRIC
+
+    requirement_id: str
+    scenario_id: str
+    metric: str
+    description: str = ""
+
+    value: Decimal
+    unit: Unit
+    currency: Currency | None = None
+
+    period_start: date
+    period_end: date
+    scope: Scope = Scope.BORROWER
+    qualifiers: tuple[Qualifier, ...] = ()
+
+    # Как величина получена: тождество словами и слагаемые с их адресами. Пусто, если
+    # число напечатано строкой, — тогда всё сказано полем `source`.
+    derivation: str = ""
+    terms: tuple[DerivedTerm, ...] = ()
+    supporting: tuple[SourceRef, ...] = ()
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @property
+    def metric_name(self) -> str:
+        return self.metric
+
+    @property
+    def counterparty(self) -> str | None:
+        """Контрагент из уточнений — по нему отбирает `FactValue`."""
+        return next((item.value for item in self.qualifiers if item.name == "counterparty"), None)
+
+
 Fact = Annotated[
     RelatedPartyPolicyFact
     | CollateralCoverageFact
@@ -171,7 +271,8 @@ Fact = Annotated[
     | OneOffPolicyFact
     | AggregateObligationFact
     | FxSettlementFact
-    | PpeRollForwardFact,
+    | PpeRollForwardFact
+    | ResolvedMetricFact,
     Field(discriminator="kind"),
 ]
 

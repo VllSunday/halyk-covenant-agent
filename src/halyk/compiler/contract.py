@@ -19,6 +19,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from halyk.models.covenant import Unit
+from halyk.models.fact import Scope
 from halyk.models.formula import CovenantFormula
 from halyk.money import Currency, Money
 
@@ -31,18 +32,6 @@ class Resolution(StrEnum):
     # Требованию удовлетворяет больше одного факта. Выбор «первого попавшегося» дал
     # бы результат, зависящий от порядка чтения документов, поэтому это отказ.
     AMBIGUOUS = "ambiguous"
-
-
-class Scope(StrEnum):
-    """Чья это величина.
-
-    У P5/6.1 числитель считается по консолидированной отчётности материнской
-    компании, а знаменатель — по собственной отчётности заёмщика. Смешать их значит
-    получить правдоподобное число не про то.
-    """
-
-    BORROWER = "borrower"
-    GROUP = "group"
 
 
 class Cardinality(StrEnum):

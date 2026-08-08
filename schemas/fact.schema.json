@@ -109,6 +109,30 @@
       "title": "Currency",
       "type": "string"
     },
+    "DerivedTerm": {
+      "description": "Одно раскрытое число, вошедшее в выведенную величину.",
+      "properties": {
+        "amount": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Amount",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "label",
+        "amount",
+        "source"
+      ],
+      "title": "DerivedTerm",
+      "type": "object"
+    },
     "DocumentKind": {
       "description": "Тип документа. Определяется по содержимому: имена файлов обезличены.",
       "enum": [
@@ -303,6 +327,25 @@
       "title": "PpeRollForwardFact",
       "type": "object"
     },
+    "Qualifier": {
+      "description": "Уточнение отбора внутри вида величины: контрагент, сегмент, валюта расчёта.\n\nПары «имя — значение», а не поля модели: набор уточнений задаёт компилятор в\nтребовании, и заводить под каждое своё поле значило бы менять контракт данных\nради нового ковенанта.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "Qualifier",
+      "type": "object"
+    },
     "RelatedPartyPolicyFact": {
       "description": "Порог отнесения к связанным сторонам и доли из досье KYC.",
       "properties": {
@@ -340,6 +383,132 @@
       ],
       "title": "RelatedPartyPolicyFact",
       "type": "object"
+    },
+    "ResolvedMetricFact": {
+      "description": "Величина, дочитанная под требование компилятора.\n\nСуществует затем, чтобы новый показатель не требовал новой модели факта. Разбор\nспециализированных величин никуда не делся и идёт первым: сюда попадает только то,\nчто детерминированный слой не закрыл и что назвал сам компилятор.\n\nВсе проверки уже пройдены к моменту создания: требование известно, документ вправе\nменять расчёт, размерность совпала, цитата найдена на заявленной странице. Здесь\nхранится результат вместе с тем, из чего он получен.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "derivation": {
+          "default": "",
+          "title": "Derivation",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "const": "resolved_metric",
+          "default": "resolved_metric",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "period_end": {
+          "format": "date",
+          "title": "Period End",
+          "type": "string"
+        },
+        "period_start": {
+          "format": "date",
+          "title": "Period Start",
+          "type": "string"
+        },
+        "qualifiers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Qualifier"
+          },
+          "title": "Qualifiers",
+          "type": "array"
+        },
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope",
+          "default": "borrower"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "supporting": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Supporting",
+          "type": "array"
+        },
+        "terms": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DerivedTerm"
+          },
+          "title": "Terms",
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        },
+        "value": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "requirement_id",
+        "scenario_id",
+        "metric",
+        "value",
+        "unit",
+        "period_start",
+        "period_end"
+      ],
+      "title": "ResolvedMetricFact",
+      "type": "object"
+    },
+    "Scope": {
+      "description": "Чья это величина.\n\nУ P5/6.1 числитель считается по консолидированной отчётности материнской компании,\nа знаменатель — по собственной отчётности заёмщика. Смешать их значит получить\nправдоподобное число не про то.\n\nЖивёт рядом с фактом, а не рядом с требованием: требование объявляет область,\nнайденная величина её носит, и общее у них — только этот перечень.",
+      "enum": [
+        "borrower",
+        "group"
+      ],
+      "title": "Scope",
+      "type": "string"
     },
     "Share": {
       "description": "Доля контрагента: голосующие права или активы в залоге.",
@@ -456,6 +625,17 @@
       ],
       "title": "SourceRef",
       "type": "object"
+    },
+    "Unit": {
+      "enum": [
+        "money",
+        "ratio",
+        "percent",
+        "count",
+        "days"
+      ],
+      "title": "Unit",
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -467,7 +647,8 @@
       "one_off_item": "#/$defs/OneOffItemFact",
       "one_off_policy": "#/$defs/OneOffPolicyFact",
       "ppe_roll_forward": "#/$defs/PpeRollForwardFact",
-      "related_party_policy": "#/$defs/RelatedPartyPolicyFact"
+      "related_party_policy": "#/$defs/RelatedPartyPolicyFact",
+      "resolved_metric": "#/$defs/ResolvedMetricFact"
     },
     "propertyName": "kind"
   },
@@ -492,6 +673,9 @@
     },
     {
       "$ref": "#/$defs/PpeRollForwardFact"
+    },
+    {
+      "$ref": "#/$defs/ResolvedMetricFact"
     }
   ]
 }

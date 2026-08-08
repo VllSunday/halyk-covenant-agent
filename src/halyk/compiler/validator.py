@@ -299,7 +299,7 @@ def candidates(requirement: FactRequirement, facts: Iterable[Fact]) -> list[Fact
     """
     found = []
     for fact in facts:
-        if fact.kind != requirement.fact_kind:
+        if fact.metric_name != requirement.fact_kind:
             continue
         if fact.account_id != requirement.account_id:
             continue

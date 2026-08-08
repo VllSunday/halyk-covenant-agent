@@ -1,20 +1,25 @@
 """Превращение того, что дочитал resolver, в факт, пригодный для расчёта.
 
 Ответ модели и факт — разные вещи. Ответ адресуется требованию компилятора и несёт
-цитату; факт адресуется заёмщику и несёт сумму в валюте, с которой умеет работать
+цитату; факт адресуется заёмщику и несёт величину в той форме, с которой работает
 исполнитель. Между ними нужен явный переход, и он здесь.
 
-Переход неполный, и это осознанно. Исполнитель читает факты трёх видов: разовую
-статью, порог существенности и совокупное обязательство. Величина, которую он в
-дерево подставить не сможет, отклоняется здесь с названной причиной, а не доезжает
-до расчёта, чтобы там превратиться в «факта не нашлось»: первое чинится правкой
-контракта, второе — поиском несуществующего документа.
+Специализированные виды разбираются первыми: разовая статья, порог существенности и
+совокупное обязательство ложатся в свои модели, потому что исполнитель уже умеет
+отбирать их по своим правилам. Всё остальное становится `ResolvedMetricFact` — вид
+величины назначает компилятор, и новый показатель не должен требовать новой модели
+данных.
+
+Отклонить величину здесь можно только по причине, которую видно в отчёте: требование
+не из этого батча, адрес не из переписи, денежная сумма без валюты. Всё остальное —
+цитаты, право документа, размерности, покрытие требований — проверено раньше, и
+повторять эти проверки значило бы держать два описания одного контракта.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from halyk.compiler.contract import FactRequirement
@@ -22,19 +27,22 @@ from halyk.models.covenant import Unit
 from halyk.models.document import DocumentFacts
 from halyk.models.fact import (
     AggregateObligationFact,
+    DerivedTerm,
     Fact,
     FactKind,
     OneOffItemFact,
     OneOffPolicyFact,
+    Qualifier,
+    ResolvedMetricFact,
 )
 from halyk.models.source import SourceRef
 from halyk.money import Currency, Money, MoneyParseError
 from halyk.resolution.batch import ResolutionResult, source_ref
 from halyk.resolution.contract import Evidence
 
-# Виды, которые исполнитель умеет подставить в дерево. Список закрыт: расширять его
-# без правки исполнителя бессмысленно — факт просто не встретится ни одному узлу.
-EXECUTABLE_KINDS = frozenset(
+# Виды, у которых есть собственная модель факта и собственные правила отбора в
+# исполнителе. Всё, чего здесь нет, доезжает до расчёта общей величиной.
+SPECIALISED_KINDS = frozenset(
     {FactKind.ONE_OFF_ITEM, FactKind.ONE_OFF_POLICY, FactKind.AGGREGATE_OBLIGATION}
 )
 
@@ -51,17 +59,61 @@ class BridgeError:
         return {"requirement_id": self.requirement_id, "code": self.code, "detail": self.detail}
 
 
-def _money(amount: Decimal, requirement: FactRequirement, currency: Currency | None) -> Money:
-    resolved = currency or requirement.currency
-    if resolved is None:
-        raise MoneyParseError("валюта не названа ни в ответе, ни в требовании")
-    return Money.from_decimal(amount, resolved)
+@dataclass(frozen=True, slots=True)
+class _Term:
+    """Слагаемое выведенной величины до того, как у него появился адрес."""
+
+    label: str
+    amount: Decimal
+    evidence: Evidence
 
 
-def _fact(
+@dataclass(frozen=True, slots=True)
+class _Answer:
+    """Ответ модели в форме, одинаковой для найденной и для выведенной величины."""
+
+    requirement_id: str
+    amount: Decimal
+    unit: Unit
+    currency: Currency | None
+    evidence: Evidence
+    confidence: float = 1.0
+    derivation: str = ""
+    terms: tuple[_Term, ...] = ()
+    supporting: tuple[Evidence, ...] = field(default=())
+
+
+@dataclass(frozen=True, slots=True)
+class _Located:
+    """Адреса ответа, сверенные с переписью."""
+
+    source: SourceRef
+    supporting: tuple[SourceRef, ...]
+    terms: tuple[DerivedTerm, ...]
+
+
+def _locate(answer: _Answer, documents: Mapping[str, DocumentFacts]) -> _Located:
+    known = dict(documents)
+    return _Located(
+        source=source_ref(answer.evidence.file_name, answer.evidence.page, known),
+        supporting=tuple(
+            source_ref(item.file_name, item.page, known) for item in answer.supporting
+        ),
+        terms=tuple(
+            DerivedTerm(
+                label=term.label,
+                amount=term.amount,
+                source=source_ref(term.evidence.file_name, term.evidence.page, known),
+            )
+            for term in answer.terms
+        ),
+    )
+
+
+def _specialised(
     requirement: FactRequirement, amount: Money, source: SourceRef, account_id: str
 ) -> Fact | None:
-    """Факт того вида, который объявило требование. Описание берётся из него же.
+    """Факт того вида, который объявило требование, если такой вид у нас есть.
 
     Описание не спрашивается у модели намеренно: по нему исполнитель отбирает статьи
     внутри вида (`description_contains`), и придуманная формулировка молча увела бы
@@ -85,15 +137,37 @@ def _fact(
     return None
 
 
-@dataclass(frozen=True, slots=True)
-class _Answer:
-    """Ответ модели в форме, одинаковой для найденной и для выведенной величины."""
+def _generic(
+    answer: _Answer, requirement: FactRequirement, located: _Located, account_id: str
+) -> ResolvedMetricFact:
+    """Величина под требование, для которого своей модели факта нет.
 
-    requirement_id: str
-    amount: Decimal
-    unit: Unit
-    currency: Currency | None
-    evidence: Evidence
+    Всё, что позволяет проверить её задним числом, хранится рядом: требование, вид,
+    период, область, уточнения отбора и адреса, по которым она прочитана.
+    """
+    return ResolvedMetricFact(
+        account_id=account_id,
+        source=located.source,
+        requirement_id=requirement.requirement_id,
+        scenario_id=requirement.scenario_id,
+        metric=requirement.fact_kind,
+        description=requirement.description,
+        value=answer.amount,
+        unit=answer.unit,
+        currency=answer.currency or requirement.currency,
+        period_start=requirement.period_start,
+        period_end=requirement.period_end,
+        scope=requirement.scope,
+        qualifiers=(
+            (Qualifier(name="counterparty", value=requirement.counterparty),)
+            if requirement.counterparty
+            else ()
+        ),
+        derivation=answer.derivation,
+        terms=located.terms,
+        supporting=located.supporting,
+        confidence=answer.confidence,
+    )
 
 
 def _build(
@@ -109,24 +183,62 @@ def _build(
             code="requirement_is_unknown",
             detail="ответ ссылается на требование, которого нет среди открытых",
         )
-    if requirement.fact_kind not in EXECUTABLE_KINDS:
-        return None, BridgeError(
-            requirement_id=name,
-            code="fact_kind_is_not_executable",
-            detail=f"величину вида {requirement.fact_kind} исполнитель подставить не умеет",
-        )
-    if answer.unit is not Unit.MONEY:
-        return None, BridgeError(
-            requirement_id=name,
-            code="unit_is_not_money",
-            detail=f"величина в {answer.unit.value}: факт хранит только денежную сумму",
-        )
     try:
-        money = _money(answer.amount, requirement, answer.currency)
-        source = source_ref(answer.evidence.file_name, answer.evidence.page, dict(documents))
+        located = _locate(answer, documents)
+        if requirement.fact_kind not in SPECIALISED_KINDS:
+            return _generic(answer, requirement, located, account_id), None
+
+        currency = answer.currency or requirement.currency
+        if answer.unit is not Unit.MONEY or currency is None:
+            raise MoneyParseError(
+                f"величина вида {requirement.fact_kind} хранится суммой, "
+                f"а пришла как {answer.unit.value} без валюты"
+            )
+        money = Money.from_decimal(answer.amount, currency)
     except (MoneyParseError, ValueError) as exc:
         return None, BridgeError(requirement_id=name, code="fact_is_not_built", detail=str(exc))
-    return _fact(requirement, money, source, account_id), None
+    return _specialised(requirement, money, located.source, account_id), None
+
+
+def _answers(result: ResolutionResult) -> list[_Answer]:
+    """Найденные и выведенные величины одним списком.
+
+    Выведенная приходит слагаемыми, и в расчёт идёт их сумма, а не итог, названный
+    моделью: сходимость этих двух чисел проверил валидатор, и брать после него
+    объявленный итог значило бы держать проверку ради отчёта.
+    """
+    found = [
+        _Answer(
+            requirement_id=item.requirement_id,
+            amount=item.amount,
+            unit=item.unit,
+            currency=item.currency,
+            evidence=item.evidence[0],
+            confidence=item.confidence,
+            supporting=tuple(item.evidence[1:]),
+        )
+        for item in result.facts
+    ]
+    return found + [
+        _Answer(
+            requirement_id=item.requirement_id,
+            amount=item.total(),
+            unit=item.unit,
+            currency=item.currency,
+            evidence=item.terms[0].evidence,
+            confidence=item.confidence,
+            derivation=item.identity,
+            terms=tuple(
+                _Term(
+                    label=term.label,
+                    amount=term.sign.factor * term.amount,
+                    evidence=term.evidence,
+                )
+                for term in item.terms
+            ),
+        )
+        for item in result.derivations
+    ]
 
 
 def to_facts(
@@ -134,26 +246,12 @@ def to_facts(
     requirements: Sequence[FactRequirement],
     documents: Mapping[str, DocumentFacts],
 ) -> tuple[tuple[Fact, ...], tuple[BridgeError, ...]]:
-    """Факты и отказы по одному заёмщику.
-
-    Выведенная величина приходит слагаемыми, и в расчёт идёт их сумма, а не итог,
-    названный моделью: сходимость этих двух чисел проверил валидатор, и брать после
-    него объявленный итог значило бы держать проверку ради отчёта.
-    """
+    """Факты и отказы по одному заёмщику."""
     known = {item.requirement_id: item for item in requirements}
     facts: list[Fact] = []
     errors: list[BridgeError] = []
 
-    answers = [
-        _Answer(item.requirement_id, item.amount, item.unit, item.currency, item.evidence[0])
-        for item in result.facts
-    ]
-    answers += [
-        _Answer(item.requirement_id, item.total(), item.unit, item.currency, item.terms[0].evidence)
-        for item in result.derivations
-    ]
-
-    for answer in answers:
+    for answer in _answers(result):
         fact, error = _build(answer, known.get(answer.requirement_id), documents, result.account_id)
         if error is not None:
             errors.append(error)
@@ -162,4 +260,4 @@ def to_facts(
     return tuple(facts), tuple(errors)
 
 
-__all__ = ["EXECUTABLE_KINDS", "BridgeError", "to_facts"]
+__all__ = ["SPECIALISED_KINDS", "BridgeError", "to_facts"]
