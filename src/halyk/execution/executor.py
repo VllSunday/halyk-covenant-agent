@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -52,6 +54,17 @@ from halyk.models.formula import (
     Sum,
 )
 from halyk.money import quantize
+
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _normalise_description(value: str) -> str:
+    """Сопоставимая форма свободного текста из модели и документа."""
+    return _WHITESPACE.sub(" ", unicodedata.normalize("NFKC", value)).strip().casefold()
+
+
+def _description_matches(needle: str | None, haystack: str) -> bool:
+    return needle is None or _normalise_description(needle) in _normalise_description(haystack)
 
 
 class Failure(StrEnum):
@@ -355,7 +368,7 @@ class Executor:
             # отрицательной, и модуль превратил бы убыток в прибыль. У разовых статей
             # наоборот — там знак несёт направление платежа, и его снимает abs.
             if isinstance(fact, ResolvedMetricFact):
-                if node.description_contains and node.description_contains not in fact.description:
+                if not _description_matches(node.description_contains, fact.description):
                     continue
                 if node.counterparty and fact.counterparty != node.counterparty:
                     continue
@@ -371,7 +384,7 @@ class Executor:
                 continue
             if not isinstance(fact, OneOffItemFact | AggregateObligationFact):
                 continue
-            if node.description_contains and node.description_contains not in fact.description:
+            if not _description_matches(node.description_contains, fact.description):
                 continue
             counterparty = getattr(fact, "counterparty", None)
             if node.counterparty and counterparty != node.counterparty:

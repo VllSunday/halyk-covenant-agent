@@ -14,7 +14,12 @@ from halyk.knowledge.related_party import build_index
 from halyk.models.adjustment import NormalisedTransaction
 from halyk.models.classification import TransactionCategory as Cat
 from halyk.models.covenant import Operator, RoundingSpec, Unit
-from halyk.models.fact import OneOffItemFact, OneOffPolicyFact, PpeRollForwardFact
+from halyk.models.fact import (
+    OneOffItemFact,
+    OneOffPolicyFact,
+    PpeRollForwardFact,
+    ResolvedMetricFact,
+)
 from halyk.models.formula import (
     Condition,
     Constant,
@@ -87,7 +92,42 @@ def spend(*categories: Cat) -> LedgerSum:
     return LedgerSum(selector=Selector(categories=categories, direction=Direction.OUTFLOW))
 
 
+def resolved_metric(description: str) -> ResolvedMetricFact:
+    return ResolvedMetricFact(
+        account_id=ACCOUNT,
+        source=SOURCE,
+        requirement_id="req-group-capex",
+        scenario_id="P1",
+        metric="group_capex",
+        description=description,
+        value=Decimal("21847362.55"),
+        unit=Unit.MONEY,
+        currency=Currency.USD,
+        period_start=date(2025, 1, 1),
+        period_end=date(2025, 12, 31),
+    )
+
+
 # --- базовая арифметика ------------------------------------------------------
+
+
+def test_resolved_fact_description_matches_case_and_unicode_spacing() -> None:
+    engine = Executor(
+        account_id=ACCOUNT,
+        transactions=(),
+        facts=(resolved_metric("Совокупные\u00a0капитальные затраты Группы"),),
+    )
+    result = engine.run(
+        formula(
+            measure=FactValue(
+                fact_kind="group_capex",
+                description_contains="совокупные капитальные затраты группы",
+            ),
+            threshold=Constant(value=Decimal("22000000")),
+        )
+    )
+    assert result.actual == Decimal("21847362.55")
+    assert result.status == "COMPLIANT"
 
 
 def test_sum_takes_the_absolute_value() -> None:
