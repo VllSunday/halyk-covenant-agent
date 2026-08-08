@@ -33,6 +33,15 @@ def sha256_tree(root: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_path(path: Path) -> str:
+    """Отпечаток входа независимо от того, архив это или распакованный каталог.
+
+    Организаторы могут выдать и то, и другое, а манифест обязан назвать вход одним
+    полем: без этого два прогона на одних данных выглядят как прогоны на разных.
+    """
+    return sha256_tree(path) if path.is_dir() else sha256_file(path)
+
+
 def canonical_json(payload: Any) -> bytes:
     """Каноническая форма для хеширования: отсортированные ключи, без лишних пробелов."""
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()

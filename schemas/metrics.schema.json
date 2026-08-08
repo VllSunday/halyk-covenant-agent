@@ -1,4 +1,53 @@
 {
+  "$defs": {
+    "StageMetrics": {
+      "description": "Расход одной роли за прогон.\n\nРоли считаются порознь, а не одной суммой: распознавание, классификация,\nкомпиляция и дочитывание отличаются и ценой вызова, и тем, что означает их\nповтор. Слитые в общий счётчик, они не отвечают на единственный вопрос, ради\nкоторого метрики и собираются, — где именно ушли деньги и время.",
+      "properties": {
+        "cache_hits": {
+          "default": 0,
+          "title": "Cache Hits",
+          "type": "integer"
+        },
+        "calls": {
+          "default": 0,
+          "title": "Calls",
+          "type": "integer"
+        },
+        "live_calls": {
+          "default": 0,
+          "title": "Live Calls",
+          "type": "integer"
+        },
+        "retries": {
+          "default": 0,
+          "title": "Retries",
+          "type": "integer"
+        },
+        "seconds": {
+          "default": 0.0,
+          "title": "Seconds",
+          "type": "number"
+        },
+        "tokens_in": {
+          "default": 0,
+          "title": "Tokens In",
+          "type": "integer"
+        },
+        "tokens_out": {
+          "default": 0,
+          "title": "Tokens Out",
+          "type": "integer"
+        },
+        "unresolved": {
+          "default": 0,
+          "title": "Unresolved",
+          "type": "integer"
+        }
+      },
+      "title": "StageMetrics",
+      "type": "object"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "borrowers_total": {
@@ -71,6 +120,13 @@
       "default": 0.0,
       "title": "Runtime Seconds",
       "type": "number"
+    },
+    "stages": {
+      "additionalProperties": {
+        "$ref": "#/$defs/StageMetrics"
+      },
+      "title": "Stages",
+      "type": "object"
     },
     "tokens_in": {
       "default": 0,

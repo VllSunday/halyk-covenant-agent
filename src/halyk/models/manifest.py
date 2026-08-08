@@ -48,6 +48,12 @@ class RunManifest(BaseModel):
     # реестра фиксируется здесь: без неё прогон не воспроизводится.
     errata_sha256: str | None = None
 
+    # Состав ячеек задаёт шаблон организаторов, а промпты и контракты определяют, что
+    # ответит модель. И то, и другое меняет результат так же, как сами документы,
+    # поэтому попадает в удостоверение прогона наравне с ними.
+    template_sha256: str | None = None
+    prompts_sha256: dict[str, str] = Field(default_factory=dict)
+
     submission_sha256: str | None = None
     model_cache_sha256: str | None = None
 

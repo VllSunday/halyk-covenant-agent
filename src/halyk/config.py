@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -55,6 +56,11 @@ class ModelConfig:
         return self.api_key
 
 
+def _optional_int(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    return int(raw) if raw else None
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     compiler: ModelConfig
@@ -63,6 +69,19 @@ class Settings:
     verifier: ModelConfig
     artifacts_dir: Path
     max_concurrency: int
+    # Шапка ответа. Значений по умолчанию нет намеренно: команда и почта уходят
+    # организаторам, и подставленная за нас заглушка означала бы сдачу не от нас.
+    team: str = ""
+    contact_email: str = ""
+    # Потолок расходов прогона. Пустое значение — без потолка: в боевом окне лимит
+    # ставится осознанно, а тихое ограничение хуже отсутствующего.
+    max_live_calls: int | None = None
+    max_input_tokens: int | None = None
+    max_cost_usd: Decimal | None = None
+    # Цена за миллион токенов. Нужна только затем, чтобы потолок стоимости не был
+    # декоративным: без неё расход прогона всегда равен нулю и лимит не сработает.
+    price_input_per_million: Decimal = Decimal(0)
+    price_output_per_million: Decimal = Decimal(0)
     offline: bool = False
 
     @classmethod
@@ -70,6 +89,7 @@ class Settings:
         load_dotenv(env_file, override=False)
         api_key = os.getenv("OPENAI_API_KEY")
         offline = offline or os.getenv("HALYK_OFFLINE", "") not in ("", "0", "false", "no")
+        cost = os.getenv("HALYK_MAX_COST_USD", "").strip()
         return cls(
             # Компиляция ковенанта — самый дорогой по последствиям шаг: ошибка здесь
             # ломает все три ячейки заёмщика сразу, поэтому уровень рассуждения выше.
@@ -103,6 +123,13 @@ class Settings:
             ),
             artifacts_dir=Path(os.getenv("HALYK_ARTIFACTS_DIR", "artifacts")),
             max_concurrency=int(os.getenv("HALYK_MAX_CONCURRENCY", "4")),
+            team=os.getenv("HALYK_TEAM", "").strip(),
+            contact_email=os.getenv("HALYK_CONTACT_EMAIL", "").strip(),
+            max_live_calls=_optional_int("HALYK_MAX_LIVE_CALLS"),
+            max_input_tokens=_optional_int("HALYK_MAX_INPUT_TOKENS"),
+            max_cost_usd=Decimal(cost) if cost else None,
+            price_input_per_million=Decimal(os.getenv("HALYK_PRICE_INPUT_PER_MTOK", "0")),
+            price_output_per_million=Decimal(os.getenv("HALYK_PRICE_OUTPUT_PER_MTOK", "0")),
             offline=offline,
         )
 

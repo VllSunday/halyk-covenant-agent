@@ -4,11 +4,35 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class StageMetrics(BaseModel):
+    """Расход одной роли за прогон.
+
+    Роли считаются порознь, а не одной суммой: распознавание, классификация,
+    компиляция и дочитывание отличаются и ценой вызова, и тем, что означает их
+    повтор. Слитые в общий счётчик, они не отвечают на единственный вопрос, ради
+    которого метрики и собираются, — где именно ушли деньги и время.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    calls: int = 0
+    cache_hits: int = 0
+    live_calls: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    seconds: float = 0.0
+    # Повтор здесь смысловой: тот же вопрос, заданный заново после негодного ответа.
+    retries: int = 0
+    unresolved: int = 0
 
 
 class RunMetrics(BaseModel):
     model_config = ConfigDict(frozen=True)
+
+    stages: dict[str, StageMetrics] = Field(default_factory=dict)
 
     documents_total: int = 0
     pages_total: int = 0

@@ -108,6 +108,13 @@
       "title": "Models",
       "type": "object"
     },
+    "prompts_sha256": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Prompts Sha256",
+      "type": "object"
+    },
     "python_version": {
       "title": "Python Version",
       "type": "string"
@@ -153,6 +160,18 @@
       "default": 0.0,
       "title": "Temperature",
       "type": "number"
+    },
+    "template_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Template Sha256"
     }
   },
   "required": [
