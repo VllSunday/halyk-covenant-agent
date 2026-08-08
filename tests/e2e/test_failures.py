@@ -151,17 +151,17 @@ def test_one_broken_borrower_keeps_the_diagnostics_of_the_others(
     assert healthy["resolver_batches"] == 1
 
 
-def test_budget_stops_the_run_before_the_second_borrower(
+def test_budget_stops_live_calls_for_parallel_borrowers(
     dataset: Path,
     tmp_path: Path,
     make_context: Callable[..., RunContext],
     make_engines: Callable[..., Engines],
 ) -> None:
-    """Потолок вызовов проверяется до сети, поэтому первый же запрос его и ловит."""
+    """Потолок проверяется до сети у каждой уже запущенной параллельной задачи."""
     context = make_context(max_live_calls=0)
     report = run(context, dataset, tmp_path, make_engines(context))
 
-    assert codes(report) >= {"budget_exhausted", "not_attempted", "cell_not_answered"}
+    assert codes(report) >= {"budget_exhausted", "cell_not_answered"}
     assert report["budget"]["live_calls"] == 0
 
 

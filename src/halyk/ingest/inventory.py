@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -196,13 +198,25 @@ def _link_by_organisation(documents: Sequence[DocumentFacts]) -> list[DocumentFa
 
 
 def build_inventory(
-    root: Path, template_scenarios: Sequence[str], ocr: CachedOcr | None = None
+    root: Path,
+    template_scenarios: Sequence[str],
+    ocr: CachedOcr | None = None,
+    *,
+    max_concurrency: int = 1,
 ) -> DatasetInventory:
     files = dataset_files(root)
     ledger_path = find_ledger(files)
     ledger = read_ledger(ledger_path)
 
-    documents = [read_document(path, ocr) for path in files if path.suffix.lower() == ".pdf"]
+    pdf_paths = [path for path in files if path.suffix.lower() == ".pdf"]
+    workers = max(1, max_concurrency)
+    if workers == 1:
+        documents = [read_document(path, ocr) for path in pdf_paths]
+    else:
+        # map сохраняет порядок входных путей: параллельность не должна менять
+        # перепись, её хеши и последующий Submission.json.
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="halyk-pdf") as pool:
+            documents = list(pool.map(partial(read_document, ocr=ocr), pdf_paths))
     skipped = tuple(p.name for p in files if p.suffix.lower() != ".pdf")
     documents = _link_by_organisation(documents)
 
@@ -216,5 +230,9 @@ def build_inventory(
         ledger_path=ledger_path,
         skipped_files=skipped,
         unresolved_documents=unresolved,
-        ocr_calls=tuple(ocr.records) if ocr is not None else (),
+        ocr_calls=(
+            tuple(sorted(ocr.records, key=lambda call: (call.document, call.page)))
+            if ocr is not None
+            else ()
+        ),
     )

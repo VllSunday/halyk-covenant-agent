@@ -28,6 +28,11 @@ uv run halyk solve --input data/dataset.zip --output Submission.json
 uv run halyk validate --submission Submission.json --template agentic-bank-public/submission_template.json
 ```
 
+`HALYK_MAX_CONCURRENCY=4` параллельно разбирает независимые PDF и заёмщиков.
+Порядок ответа при этом остаётся порядком шаблона, а общий лимит стоимости и
+числа живых вызовов применяется ко всему прогону. При ответах API `429` уменьшите
+значение до `2`; последовательный диагностический режим — `1`.
+
 Состав ячеек берётся из `submission_template.json` внутри датасета; свой шаблон
 задаётся флагом `--template`.
 

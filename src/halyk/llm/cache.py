@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from halyk.hashing import sha256_payload
@@ -56,6 +57,15 @@ class CacheMissError(RuntimeError):
 class CacheStats:
     hits: int = 0
     live: int = 0
+    _lock: Lock = field(default_factory=Lock, repr=False)
+
+    def record_hit(self) -> None:
+        with self._lock:
+            self.hits += 1
+
+    def record_live(self) -> None:
+        with self._lock:
+            self.live += 1
 
     @property
     def total(self) -> int:
@@ -90,18 +100,20 @@ class CacheJournal:
     """
 
     entries: dict[str, CacheEntry] = field(default_factory=dict)
+    _lock: Lock = field(default_factory=Lock, repr=False)
 
     def record(self, role: str, key: str, payload: Any, *, reused: bool) -> None:
         # Первое обращение побеждает: записанный этим прогоном ответ потом читается
         # из кэша, и перезапись пометила бы его как пришедший со стороны.
-        self.entries.setdefault(
-            key,
-            CacheEntry(role=role, key=key, sha256=sha256_payload(payload), reused=reused),
-        )
+        entry = CacheEntry(role=role, key=key, sha256=sha256_payload(payload), reused=reused)
+        with self._lock:
+            self.entries.setdefault(key, entry)
 
     @property
     def ordered(self) -> list[CacheEntry]:
-        return sorted(self.entries.values(), key=lambda item: (item.role, item.key))
+        with self._lock:
+            entries = tuple(self.entries.values())
+        return sorted(entries, key=lambda item: (item.role, item.key))
 
     @property
     def digest(self) -> str:
@@ -129,6 +141,7 @@ class ModelCache:
     role: str = ""
     journal: CacheJournal | None = None
     stats: CacheStats = field(default_factory=CacheStats)
+    _file_lock: Lock = field(default_factory=Lock, repr=False)
 
     def __post_init__(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -174,25 +187,28 @@ class ModelCache:
                 )
             return None
 
-        self.stats.hits += 1
-        loaded: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        with self._file_lock:
+            loaded: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        self.stats.record_hit()
         if self.journal is not None:
             self.journal.record(self.role, key, loaded, reused=True)
         return loaded
 
     def put(self, key: str, response: dict[str, Any]) -> None:
-        self.stats.live += 1
-        self._path(key).write_text(
-            json.dumps(response, ensure_ascii=False, sort_keys=True, indent=2),
-            encoding="utf-8",
-        )
+        self.stats.record_live()
+        with self._file_lock:
+            self._path(key).write_text(
+                json.dumps(response, ensure_ascii=False, sort_keys=True, indent=2),
+                encoding="utf-8",
+            )
         if self.journal is not None:
             self.journal.record(self.role, key, response, reused=False)
 
     def alias(self, source_key: str, target_key: str) -> None:
         """Сохранить успешный ответ под воспроизводимым альтернативным ключом."""
         source = self._path(source_key)
-        if not source.exists():
-            raise FileNotFoundError(source)
         target = self._path(target_key)
-        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+        with self._file_lock:
+            if not source.exists():
+                raise FileNotFoundError(source)
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -114,45 +115,40 @@ def _run_borrowers(
     inventory: DatasetInventory,
     facts: FactSet,
     engines: Engines,
+    *,
+    max_concurrency: int = 1,
 ) -> list[BorrowerResult]:
-    """Все заёмщики шаблона по очереди. Падение одного не уносит остальных."""
+    """Независимые заёмщики параллельно, результат — в порядке шаблона."""
     clauses = _clauses_by_scenario(template)
     accounts = inventory.scenarios.scenario_to_account
-    results: list[BorrowerResult] = []
-    exhausted: BudgetError | None = None
 
-    for scenario in template.scenarios:
+    def run_one(scenario: str) -> BorrowerResult:
         account = accounts.get(scenario, "")
-        if exhausted is not None:
-            problem = Problem(
-                code="not_attempted",
-                subject=scenario,
-                detail=f"прогон остановлен раньше: {exhausted}",
-            )
-            results.append(_failed(scenario, account, problem))
-            continue
         try:
-            results.append(
-                solve_borrower(
-                    scenario,
-                    account,
-                    clauses[scenario],
-                    inventory=inventory,
-                    facts=facts,
-                    engines=engines,
-                )
+            return solve_borrower(
+                scenario,
+                account,
+                clauses[scenario],
+                inventory=inventory,
+                facts=facts,
+                engines=engines,
             )
         except BudgetError as exc:
-            # Бюджет общий на прогон: исчерпав его на одном заёмщике, продолжать
-            # незачем — каждый следующий упрётся в тот же потолок, но уже с попыткой.
-            exhausted = exc
-            results.append(
-                _failed(scenario, account, Problem("budget_exhausted", scenario, str(exc)))
-            )
+            # Budget.authorise защищён общей блокировкой: параллельные задачи могут
+            # завершить уже разрешённые вызовы, но новый вызов потолок не пересечёт.
+            return _failed(scenario, account, Problem("budget_exhausted", scenario, str(exc)))
         except Exception as exc:  # отказ заёмщика — запись в отчёте, а не конец прогона
             problem = Problem("borrower_failed", scenario, f"{type(exc).__name__}: {exc}")
-            results.append(_failed(scenario, account, problem))
-    return results
+            return _failed(scenario, account, problem)
+
+    workers = max(1, max_concurrency)
+    if workers == 1:
+        return [run_one(scenario) for scenario in template.scenarios]
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="halyk-borrower") as pool:
+        futures = {scenario: pool.submit(run_one, scenario) for scenario in template.scenarios}
+        # Получаем результаты в порядке шаблона, а не в порядке завершения потоков.
+        return [futures[scenario].result() for scenario in template.scenarios]
 
 
 def _steps(cell: AnsweredCell, transactions: int) -> tuple[CalculationStep, ...]:
@@ -396,7 +392,12 @@ def solve(
     # Перепись и реестр — общий вход всех заёмщиков. Отказ здесь означает, что считать
     # нечего вовсе, и разбирать его по заёмщикам нечестно: ни один из них не начинался.
     try:
-        inventory = build_inventory(dataset_root, template.scenarios, tools.ocr)
+        inventory = build_inventory(
+            dataset_root,
+            template.scenarios,
+            tools.ocr,
+            max_concurrency=context.settings.max_concurrency,
+        )
         facts = build_facts(inventory)
     except CacheMissError as exc:
         # Распознавание идёт до всякого расчёта, и промах кэша здесь — не свойство
@@ -410,7 +411,13 @@ def solve(
 
     violations = [*check_documents(inventory), *check_facts(facts, inventory)]
 
-    results = _run_borrowers(template, inventory, facts, tools)
+    results = _run_borrowers(
+        template,
+        inventory,
+        facts,
+        tools,
+        max_concurrency=context.settings.max_concurrency,
+    )
     answers: dict[tuple[str, str], Outcome] = {
         cell.cell: cell.outcome for result in results for cell in result.answered
     }
