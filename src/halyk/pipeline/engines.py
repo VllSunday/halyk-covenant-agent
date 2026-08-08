@@ -23,7 +23,7 @@ from halyk.knowledge.classifier import TransactionClassifier
 from halyk.llm import classify
 from halyk.llm.cache import CacheJournal, CacheRole, ModelCache
 from halyk.llm.classify import CategoryClassifier
-from halyk.llm.runner import Budget, StructuredModelRunner
+from halyk.llm.runner import Budget, CascadingModelRunner, StructuredModelRunner
 from halyk.llm.schema import strict_schema
 from halyk.parsing.ocr import (
     OCR_INSTRUCTIONS,
@@ -106,19 +106,35 @@ def build_engines(context: RunContext) -> Engines:
 
     return Engines(
         compiler=CovenantCompiler(
-            runner=StructuredModelRunner(
-                config=settings.compiler,
-                cache=cache(CacheRole.COMPILER),
-                budget=budget,
-                semantic_attempts=3,
+            runner=CascadingModelRunner(
+                primary=StructuredModelRunner(
+                    config=settings.compiler,
+                    cache=cache(CacheRole.COMPILER),
+                    budget=budget,
+                    semantic_attempts=2,
+                ),
+                fallback=StructuredModelRunner(
+                    config=settings.fallback,
+                    cache=cache(CacheRole.COMPILER),
+                    budget=budget,
+                    semantic_attempts=2,
+                ),
             )
         ),
-        # Resolver работает на настройках компилятора: он читает те же документы и
-        # ошибается так же дорого. Отдельной роли в настройках нет намеренно — лишний
-        # переключатель, который пришлось бы держать согласованным с компилятором.
         resolver=RequirementResolver(
-            runner=StructuredModelRunner(
-                config=settings.compiler, cache=cache(CacheRole.RESOLVER), budget=budget
+            runner=CascadingModelRunner(
+                primary=StructuredModelRunner(
+                    config=settings.resolver,
+                    cache=cache(CacheRole.RESOLVER),
+                    budget=budget,
+                    semantic_attempts=2,
+                ),
+                fallback=StructuredModelRunner(
+                    config=settings.fallback,
+                    cache=cache(CacheRole.RESOLVER),
+                    budget=budget,
+                    semantic_attempts=2,
+                ),
             )
         ),
         classifier=TransactionClassifier(
@@ -131,7 +147,13 @@ def build_engines(context: RunContext) -> Engines:
         ),
         # Ключ не спрашивается заранее: страница без пригодного текстового слоя может
         # и не встретиться, а отказ за отсутствие ключа тогда стоил бы прогона.
-        ocr=CachedOcr(engine=OpenAIVisionOcr(config=settings.ocr), cache=cache(CacheRole.OCR)),
+        ocr=CachedOcr(
+            engine=OpenAIVisionOcr(config=settings.ocr),
+            cache=cache(CacheRole.OCR),
+            budget=budget,
+            input_price=settings.ocr.price_input_per_million,
+            output_price=settings.ocr.price_output_per_million,
+        ),
         budget=budget,
         journal=journal,
     )

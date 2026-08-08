@@ -49,7 +49,7 @@ app = typer.Typer(
 console = Console()
 error_console = Console(stderr=True, style="red")
 
-SMOKE_ROLES = ("ocr", "compiler", "classifier", "verifier")
+SMOKE_ROLES = ("ocr", "compiler", "resolver", "classifier", "verifier", "fallback")
 
 
 def _latest_run(artifacts_dir: Path) -> Path:
@@ -621,8 +621,10 @@ def smoke(
     by_role = {
         "ocr": settings.ocr,
         "compiler": settings.compiler,
+        "resolver": settings.resolver,
         "classifier": settings.classifier,
         "verifier": settings.verifier,
+        "fallback": settings.fallback,
     }
     for role_name, config in ((r, by_role[r]) for r in SMOKE_ROLES if role in (None, r)):
         # Отсутствие ключа — обычная ситуация настройки, а не сбой: показываем

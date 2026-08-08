@@ -7,7 +7,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-DEFAULT_MODEL = "gpt-5.6-sol"
+DEFAULT_COMPILER_MODEL = "gpt-5.6-terra"
+DEFAULT_OCR_MODEL = "gpt-5.6-terra"
+DEFAULT_CLASSIFIER_MODEL = "gpt-5.6-luna"
+DEFAULT_VERIFIER_MODEL = "gpt-5.6-terra"
+DEFAULT_FALLBACK_MODEL = "gpt-5.6-sol"
+MODEL_PRICES: dict[str, tuple[Decimal, Decimal]] = {
+    "gpt-5.6-sol": (Decimal("5"), Decimal("30")),
+    "gpt-5.6-terra": (Decimal("2"), Decimal("12")),
+    "gpt-5.6-luna": (Decimal("0.2"), Decimal("1.2")),
+}
 
 
 class ConfigError(RuntimeError):
@@ -33,6 +42,8 @@ class ModelConfig:
     timeout_seconds: float = 90.0
     max_retries: int = 2
     max_output_tokens: int | None = None
+    price_input_per_million: Decimal | None = None
+    price_output_per_million: Decimal | None = None
     offline: bool = False
 
     def authorise_live_call(self, purpose: str) -> str:
@@ -65,6 +76,8 @@ def _optional_int(name: str) -> int | None:
 @dataclass(frozen=True, slots=True)
 class Settings:
     compiler: ModelConfig
+    resolver: ModelConfig
+    fallback: ModelConfig
     ocr: ModelConfig
     classifier: ModelConfig
     verifier: ModelConfig
@@ -99,40 +112,63 @@ class Settings:
         max_total_input_tokens = _optional_int("HALYK_MAX_TOTAL_INPUT_TOKENS")
         if max_total_input_tokens is None:
             max_total_input_tokens = _optional_int("HALYK_MAX_INPUT_TOKENS")
+
+        fallback_prices = (
+            Decimal(os.getenv("HALYK_PRICE_INPUT_PER_MTOK", "0")),
+            Decimal(os.getenv("HALYK_PRICE_OUTPUT_PER_MTOK", "0")),
+        )
+
+        def model(
+            name: str,
+            effort: str,
+            *,
+            timeout: float = 90.0,
+        ) -> ModelConfig:
+            input_price, output_price = MODEL_PRICES.get(name, fallback_prices)
+            return ModelConfig(
+                name=name,
+                api_key=api_key,
+                reasoning_effort=effort,
+                timeout_seconds=timeout,
+                max_output_tokens=max_output_tokens,
+                price_input_per_million=input_price,
+                price_output_per_million=output_price,
+                offline=offline,
+            )
+
         return cls(
             # Компиляция ковенанта — самый дорогой по последствиям шаг: ошибка здесь
             # ломает все три ячейки заёмщика сразу, поэтому уровень рассуждения выше.
-            compiler=ModelConfig(
-                name=os.getenv("HALYK_COMPILER_MODEL", DEFAULT_MODEL),
-                api_key=api_key,
-                reasoning_effort=os.getenv("HALYK_COMPILER_EFFORT", "high"),
-                timeout_seconds=float(os.getenv("HALYK_COMPILER_TIMEOUT_SECONDS", "180")),
-                max_output_tokens=max_output_tokens,
-                offline=offline,
+            compiler=model(
+                os.getenv("HALYK_COMPILER_MODEL", DEFAULT_COMPILER_MODEL),
+                os.getenv("HALYK_COMPILER_EFFORT", "high"),
+                timeout=float(os.getenv("HALYK_COMPILER_TIMEOUT_SECONDS", "180")),
+            ),
+            resolver=model(
+                os.getenv("HALYK_RESOLVER_MODEL", DEFAULT_COMPILER_MODEL),
+                os.getenv("HALYK_RESOLVER_EFFORT", "high"),
+                timeout=float(os.getenv("HALYK_RESOLVER_TIMEOUT_SECONDS", "180")),
+            ),
+            fallback=model(
+                os.getenv("HALYK_FALLBACK_MODEL", DEFAULT_FALLBACK_MODEL),
+                os.getenv("HALYK_FALLBACK_EFFORT", "high"),
+                timeout=float(os.getenv("HALYK_FALLBACK_TIMEOUT_SECONDS", "180")),
             ),
             # Распознавание — задача восприятия, а не рассуждения; высокий уровень
             # только замедляет её, не добавляя точности.
-            ocr=ModelConfig(
-                name=os.getenv("HALYK_OCR_MODEL", DEFAULT_MODEL),
-                api_key=api_key,
-                reasoning_effort=os.getenv("HALYK_OCR_EFFORT", "low"),
-                offline=offline,
+            ocr=model(
+                os.getenv("HALYK_OCR_MODEL", DEFAULT_OCR_MODEL),
+                os.getenv("HALYK_OCR_EFFORT", "low"),
             ),
             # Отнесение операции к статье — задача чтения, а не вывода: высокий
             # уровень рассуждения удлиняет двенадцать батчей, не меняя ответа.
-            classifier=ModelConfig(
-                name=os.getenv("HALYK_CLASSIFIER_MODEL", DEFAULT_MODEL),
-                api_key=api_key,
-                reasoning_effort=os.getenv("HALYK_CLASSIFIER_EFFORT", "medium"),
-                max_output_tokens=max_output_tokens,
-                offline=offline,
+            classifier=model(
+                os.getenv("HALYK_CLASSIFIER_MODEL", DEFAULT_CLASSIFIER_MODEL),
+                os.getenv("HALYK_CLASSIFIER_EFFORT", "medium"),
             ),
-            verifier=ModelConfig(
-                name=os.getenv("HALYK_VERIFIER_MODEL", DEFAULT_MODEL),
-                api_key=api_key,
-                reasoning_effort=os.getenv("HALYK_VERIFIER_EFFORT", "xhigh"),
-                max_output_tokens=max_output_tokens,
-                offline=offline,
+            verifier=model(
+                os.getenv("HALYK_VERIFIER_MODEL", DEFAULT_VERIFIER_MODEL),
+                os.getenv("HALYK_VERIFIER_EFFORT", "medium"),
             ),
             artifacts_dir=Path(os.getenv("HALYK_ARTIFACTS_DIR", "artifacts")),
             max_concurrency=int(os.getenv("HALYK_MAX_CONCURRENCY", "4")),
@@ -156,6 +192,8 @@ class Settings:
         """Идёт в run_manifest, поэтому имена берутся из тех же объектов, что и вызовы."""
         return {
             "covenant_compiler": self.compiler.name,
+            "fact_resolver": self.resolver.name,
+            "failure_escalation": self.fallback.name,
             "ocr": self.ocr.name,
             "classifier": self.classifier.name,
             "verifier": self.verifier.name,

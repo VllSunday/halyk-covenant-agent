@@ -42,7 +42,7 @@ from halyk.compiler.validator import (
 from halyk.knowledge.authority import resolve_authority
 from halyk.knowledge.errata import ErrataRegistry
 from halyk.llm.documents import index, own_documents, render, source_hashes
-from halyk.llm.runner import Request, Role, StructuredModelRunner
+from halyk.llm.runner import ModelRunner, Request, Role
 from halyk.llm.schema import strict_schema
 from halyk.models.classification import TransactionCategory
 from halyk.models.document import DocumentFacts, DocumentKind
@@ -139,6 +139,17 @@ class CompilationResult:
     @property
     def open_requirements(self) -> tuple[FactRequirement, ...]:
         return tuple(item for clause in self.clauses for item in clause.open_requirements)
+
+
+def _incomplete_clauses(clauses: tuple[CompiledClause, ...]) -> str | None:
+    cells = [
+        f"{clause.formula.scenario_id}/{clause.formula.clause_id}"
+        for clause in clauses
+        if clause.unresolved_terms
+    ]
+    if not cells:
+        return None
+    return f"неразобранные термины в ячейках: {', '.join(cells)}"
 
 
 def normalise_periods(clauses: Sequence[CompiledClause]) -> tuple[CompiledClause, ...]:
@@ -311,7 +322,7 @@ class CovenantCompiler:
     проверка ответа и живёт в `_parse`, а не после вызова.
     """
 
-    runner: StructuredModelRunner
+    runner: ModelRunner
     errata: ErrataRegistry = field(default_factory=ErrataRegistry.load)
 
     def compile(self, batch: CompilerBatch, facts: Sequence[Fact] = ()) -> CompilationResult:
@@ -320,6 +331,7 @@ class CovenantCompiler:
         clauses = self.runner.run(
             self.request(batch),
             partial(self._parse, batch=batch, documents=documents),
+            escalate_if=_incomplete_clauses,
         )
         clauses = tuple(
             clause.model_copy(update={"formula": self.errata.apply_formula(clause.formula)[0]})

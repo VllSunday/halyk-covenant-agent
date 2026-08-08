@@ -134,7 +134,9 @@ def test_compiler_has_a_longer_configurable_timeout(monkeypatch: pytest.MonkeyPa
 
 
 def test_old_input_limit_name_remains_a_total_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HALYK_MAX_TOTAL_INPUT_TOKENS", raising=False)
+    # Пустое новое имя имитирует его отсутствие, не давая load_dotenv повторно
+    # подхватить локальное значение разработчика из .env.
+    monkeypatch.setenv("HALYK_MAX_TOTAL_INPUT_TOKENS", "")
     monkeypatch.setenv("HALYK_MAX_INPUT_TOKENS", "90000")
 
     assert Settings.from_env().max_total_input_tokens == 90000

@@ -10,12 +10,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from halyk.llm.classify import CategoryClassifier
-from halyk.llm.runner import Role, StructuredModelRunner
+from halyk.llm.runner import ModelRunner, Role
 from halyk.models.metrics import StageMetrics
 from halyk.parsing.ocr import OcrCall
 
 
-def from_runner(runner: StructuredModelRunner, role: Role, unresolved: int = 0) -> StageMetrics:
+def from_runner(runner: ModelRunner, role: Role, unresolved: int = 0) -> StageMetrics:
     """Свод по одной роли структурированного вызова.
 
     Повтором считается попытка со вторым номером: транспортный повтор ключа не

@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from halyk.config import ModelConfig
 from halyk.llm.cache import CachePolicy, ModelCache
+from halyk.llm.runner import Budget
 from halyk.parsing.ocr import CachedOcr, OcrResponse, OpenAIVisionOcr
 
 
@@ -88,6 +90,24 @@ def test_cache_hits_do_not_add_to_the_token_bill(tmp_path: Path) -> None:
     assert usage["live_calls"] == 0
     assert usage["cache_hits"] == 1
     assert usage["total_tokens"] == 0
+
+
+def test_ocr_is_included_in_the_shared_cost_limit(tmp_path: Path) -> None:
+    budget = Budget(
+        price_input_per_million=Decimal(5),
+        price_output_per_million=Decimal(30),
+    )
+    ocr = CachedOcr(
+        engine=FakeEngine(),
+        cache=cache(tmp_path),
+        budget=budget,
+        input_price=Decimal(2),
+        output_price=Decimal(12),
+    )
+
+    recognise(ocr, b"page-bytes")
+
+    assert budget.estimated_cost == Decimal("0.006")
 
 
 def test_changed_prompt_parameters_invalidate_the_cache(tmp_path: Path) -> None:

@@ -187,7 +187,14 @@ def test_manifest_names_every_input(
     assert len(manifest["input_sha256"]) == 64
     assert len(manifest["template_sha256"]) == 64
     assert set(manifest["prompts_sha256"]) == {"compiler", "resolver", "classifier", "ocr"}
-    assert set(manifest["models"]) == {"covenant_compiler", "ocr", "classifier", "verifier"}
+    assert set(manifest["models"]) == {
+        "covenant_compiler",
+        "fact_resolver",
+        "failure_escalation",
+        "ocr",
+        "classifier",
+        "verifier",
+    }
     # Отпечаток обязан сходиться с файлом на диске, а не с тем, что мы собирались
     # записать: на Windows перевод строки по умолчанию другой, и это ровно та ошибка,
     # которую заметит только проверяющий.

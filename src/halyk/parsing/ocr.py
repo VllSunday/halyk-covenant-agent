@@ -12,11 +12,13 @@ import base64
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Literal, Protocol
 
 from halyk.config import ModelConfig
 from halyk.hashing import sha256_bytes
 from halyk.llm.cache import ModelCache
+from halyk.llm.runner import Budget
 
 ImageDetail = Literal["low", "high", "auto", "original"]
 
@@ -129,6 +131,11 @@ class CachedOcr:
 
     engine: OcrEngine
     cache: ModelCache
+    budget: Budget | None = None
+    input_price: Decimal | None = None
+    output_price: Decimal | None = None
+    estimated_input_tokens: int = 6000
+    max_output_tokens: int | None = 2000
     records: list[OcrCall] = field(default_factory=list)
 
     @property
@@ -161,7 +168,33 @@ class CachedOcr:
             )
             return str(cached["text"])
 
-        response = self.engine.recognise(image)
+        if self.budget is not None:
+            self.budget.authorise(
+                self.estimated_input_tokens,
+                input_price=self.input_price,
+                output_price=self.output_price,
+                max_output_tokens=self.max_output_tokens,
+            )
+        try:
+            response = self.engine.recognise(image)
+        except Exception:
+            if self.budget is not None:
+                self.budget.record(
+                    None,
+                    None,
+                    self.estimated_input_tokens,
+                    input_price=self.input_price,
+                    output_price=self.output_price,
+                )
+            raise
+        if self.budget is not None:
+            self.budget.record(
+                response.input_tokens,
+                response.output_tokens,
+                self.estimated_input_tokens,
+                input_price=self.input_price,
+                output_price=self.output_price,
+            )
         self.records.append(
             OcrCall(
                 document=document,

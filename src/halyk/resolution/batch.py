@@ -28,7 +28,7 @@ from pydantic import ValidationError
 from halyk.compiler.contract import Cardinality, FactRequirement
 from halyk.knowledge.authority import resolve_authority
 from halyk.llm.documents import index, own_documents, render, source_hashes
-from halyk.llm.runner import Request, Role, StructuredModelRunner
+from halyk.llm.runner import ModelRunner, Request, Role
 from halyk.llm.schema import strict_schema
 from halyk.models.adjustment import (
     Adjustment,
@@ -159,6 +159,12 @@ class ResolutionResult:
         """Требования, которые расчёт не получит: и отказанные, и спорные."""
         refused = {item.requirement_id for item in self.unresolved}
         return tuple(sorted(refused | set(self.ambiguous)))
+
+
+def _unresolved_requirements(result: ResolutionResult) -> str | None:
+    if not result.still_open:
+        return None
+    return f"не закрыты требования: {', '.join(result.still_open)}"
 
 
 def source_ref(evidence_file: str, page: int, documents: dict[str, DocumentFacts]) -> SourceRef:
@@ -300,7 +306,7 @@ class RequirementResolver:
     ответ — исключение из разбора. Поэтому проверка живёт в `_parse`.
     """
 
-    runner: StructuredModelRunner
+    runner: ModelRunner
 
     def resolve(self, batch: ResolverBatch) -> ResolutionResult:
         """Дочитать открытые требования заёмщика.
@@ -312,7 +318,9 @@ class RequirementResolver:
             return ResolutionResult(account_id=batch.account_id)
         documents = index(batch.documents)
         return self.runner.run(
-            self.request(batch), partial(self._parse, batch=batch, documents=documents)
+            self.request(batch),
+            partial(self._parse, batch=batch, documents=documents),
+            escalate_if=_unresolved_requirements,
         )
 
     def request(self, batch: ResolverBatch) -> Request:

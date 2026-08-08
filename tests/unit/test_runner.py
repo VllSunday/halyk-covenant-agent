@@ -19,6 +19,7 @@ from halyk.llm.cache import CacheMissError, CachePolicy, ModelCache
 from halyk.llm.runner import (
     Budget,
     BudgetError,
+    CascadingModelRunner,
     InvalidResponseError,
     Request,
     Role,
@@ -268,6 +269,23 @@ def test_cost_limit_stops_the_next_call(tmp_path: Path) -> None:
         engine.run(request({"clause": "6.2"}), parse)
 
 
+def test_model_price_overrides_the_global_fallback_price(tmp_path: Path) -> None:
+    budget = Budget(
+        price_input_per_million=Decimal(5),
+        price_output_per_million=Decimal(30),
+    )
+    engine = runner(tmp_path, budget=budget, responder=Responder({"value": 1}))
+    engine.config = replace(
+        engine.config,
+        price_input_per_million=Decimal("0.2"),
+        price_output_per_million=Decimal("1.2"),
+    )
+
+    engine.run(request(), parse)
+
+    assert budget.estimated_cost == Decimal("0.000044")
+
+
 def test_cache_hits_do_not_spend_the_budget(tmp_path: Path) -> None:
     engine = runner(tmp_path, budget=Budget(max_live_calls=1), responder=Responder({"value": 5}))
 
@@ -330,6 +348,56 @@ def test_two_invalid_answers_give_up(tmp_path: Path) -> None:
     with pytest.raises(InvalidResponseError):
         engine.run(request(), parse)
     assert responder.sent == 2
+
+
+def test_semantic_failure_escalates_to_fallback_model(tmp_path: Path) -> None:
+    primary_responder = Responder({"wrong": 1})
+    fallback_responder = Responder({"value": 42})
+    primary = runner(tmp_path / "primary", responder=primary_responder)
+    primary.semantic_attempts = 1
+    primary.config = replace(primary.config, name="gpt-5.6-terra")
+    fallback = runner(tmp_path / "fallback", responder=fallback_responder)
+    fallback.config = replace(fallback.config, name="gpt-5.6-sol")
+    cascade = CascadingModelRunner(primary, fallback)
+
+    assert cascade.run(request(), parse) == 42
+    assert [call.model for call in cascade.calls] == ["gpt-5.6-terra", "gpt-5.6-sol"]
+    assert "последняя причина" in fallback_responder.requests[0].instructions
+    assert "KeyError" in fallback_responder.requests[0].instructions
+
+
+def test_valid_but_incomplete_answer_escalates_to_fallback_model(tmp_path: Path) -> None:
+    primary_responder = Responder({"value": 1})
+    fallback_responder = Responder({"value": 42})
+    cascade = CascadingModelRunner(
+        runner(tmp_path / "primary", responder=primary_responder),
+        runner(tmp_path / "fallback", responder=fallback_responder),
+    )
+
+    result = cascade.run(
+        request(),
+        parse,
+        escalate_if=lambda value: "результат остался неполным" if value == 1 else None,
+    )
+
+    assert result == 42
+    assert primary_responder.sent == 1
+    assert fallback_responder.sent == 1
+    assert "результат остался неполным" in fallback_responder.requests[0].instructions
+
+
+def test_quota_error_does_not_escalate_to_fallback(tmp_path: Path) -> None:
+    primary_responder = Responder(QuotaError("credit_balance_exhausted"))
+    fallback_responder = Responder({"value": 42})
+    cascade = CascadingModelRunner(
+        runner(tmp_path / "primary", responder=primary_responder),
+        runner(tmp_path / "fallback", responder=fallback_responder),
+    )
+
+    with pytest.raises(QuotaError):
+        cascade.run(request(), parse)
+    assert primary_responder.sent == 1
+    assert fallback_responder.sent == 0
 
 
 def test_semantic_attempt_limit_is_configurable(tmp_path: Path) -> None:

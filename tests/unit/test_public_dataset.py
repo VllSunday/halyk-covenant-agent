@@ -14,7 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from halyk.cli import app
-from halyk.config import Settings
+from halyk.config import ModelConfig
 from halyk.dev.scoring import load_ground_truth, score_submission
 from halyk.ingest.inventory import DatasetInventory, build_inventory
 from halyk.ingest.normalise import CovenantPeriod, NormalisedLedger, normalise
@@ -70,7 +70,16 @@ def recognised() -> DatasetInventory:
     параметры вызова, и с другими значениями попадания не будет.
     """
     engine = CachedOcr(
-        engine=OpenAIVisionOcr(config=Settings.from_env().ocr),
+        # Проверка данных воспроизводит уже оплаченный эталонный OCR-кэш. Боевой
+        # выбор модели проверяется отдельно и не должен превращать pytest в API-клиент.
+        engine=OpenAIVisionOcr(
+            config=ModelConfig(
+                name="gpt-5.6-sol",
+                api_key=None,
+                reasoning_effort="low",
+                offline=True,
+            )
+        ),
         cache=ModelCache(directory=OCR_CACHE, policy=CachePolicy.REPLAY),
     )
     return build_inventory(DATASET, SubmissionTemplate.load(TEMPLATE).scenarios, engine)
@@ -401,7 +410,11 @@ def test_nothing_is_left_unaccounted_for(ledger: NormalisedLedger, facts: FactSe
 
 @needs_ocr
 def test_strict_run_passes_on_the_public_dataset(tmp_path: Path) -> None:
-    result = CliRunner().invoke(app, [*_facts_command(tmp_path), "--strict"])
+    result = CliRunner().invoke(
+        app,
+        [*_facts_command(tmp_path), "--strict"],
+        env={"HALYK_OCR_MODEL": "gpt-5.6-sol", "HALYK_OFFLINE": "1"},
+    )
     assert result.exit_code == 0, result.output
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert summary["period"] == {"start": "2025-01-01", "end": "2025-12-31"}
@@ -417,7 +430,9 @@ def test_strict_run_fails_when_a_document_stops_having_effect(tmp_path: Path) ->
     обязан это заметить, а не отчитаться об успехе.
     """
     result = CliRunner().invoke(
-        app, [*_facts_command(tmp_path), "--strict", "--period-end", "2025-11-19"]
+        app,
+        [*_facts_command(tmp_path), "--strict", "--period-end", "2025-11-19"],
+        env={"HALYK_OCR_MODEL": "gpt-5.6-sol", "HALYK_OFFLINE": "1"},
     )
     assert result.exit_code == 1
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))

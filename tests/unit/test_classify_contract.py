@@ -1,5 +1,6 @@
 """Приём ответа модели: что считается пригодным элементом."""
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ import pytest
 from halyk.config import ModelConfig
 from halyk.llm.cache import CachePolicy, ModelCache
 from halyk.llm.classify import CategoryClassifier, TransactionInput
+from halyk.llm.runner import Budget
 from halyk.models.classification import TransactionCategory as C
 
 ROW = TransactionInput(
@@ -95,3 +97,29 @@ def test_invalid_item_becomes_a_missing_row(tmp_path: Path) -> None:
     assert engine.asked == [(ROW.txn_id,), (ROW.txn_id,)]
     assert engine.calls[0].missing == (ROW.txn_id,)
     assert found[ROW.txn_id].category is C.INTEREST_EXPENSE
+
+
+def test_classifier_charges_its_own_model_price(tmp_path: Path) -> None:
+    class Engine(CategoryClassifier):
+        def _ask(self, rows: Any) -> tuple[dict[str, Any], tuple[None, None, None], str]:
+            return {"items": [item()]}, (None, None, None), "req"
+
+    budget = Budget(
+        price_input_per_million=Decimal(5),
+        price_output_per_million=Decimal(30),
+    )
+    engine = Engine(
+        config=ModelConfig(
+            name="gpt-5.6-luna",
+            api_key="test",
+            price_input_per_million=Decimal("0.2"),
+            price_output_per_million=Decimal("1.2"),
+        ),
+        cache=ModelCache(directory=tmp_path / "c", policy=CachePolicy.READ_WRITE),
+        budget=budget,
+    )
+
+    expected = Decimal(engine._estimate([ROW])) * Decimal("0.2") / Decimal(1_000_000)
+    engine.classify("ACC-7801", [ROW])
+
+    assert budget.estimated_cost == expected

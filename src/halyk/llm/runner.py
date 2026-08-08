@@ -30,6 +30,7 @@ from halyk.hashing import sha256_payload
 from halyk.llm.cache import ModelCache
 
 T = TypeVar("T")
+EscalationReason = Callable[[T], str | None]
 
 # Символов на токен. Оценка грубая и намеренно заниженная: она нужна до вызова,
 # чтобы не начать запрос, который выйдет за лимит, а точное число приходит потом от
@@ -92,16 +93,35 @@ class Budget:
     # потока пройдут проверку на последнем оставшемся вызове и сделают два.
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def authorise(self, estimated_input_tokens: int) -> None:
+    def authorise(
+        self,
+        estimated_input_tokens: int,
+        *,
+        input_price: Decimal | None = None,
+        output_price: Decimal | None = None,
+        max_output_tokens: int | None = None,
+    ) -> None:
         """Разрешение на одну физическую попытку. Бросает, если её делать нельзя."""
         with self._lock:
-            self._check(estimated_input_tokens)
+            self._check(
+                estimated_input_tokens,
+                input_price=input_price,
+                output_price=output_price,
+                max_output_tokens=max_output_tokens,
+            )
             # Попытка засчитывается здесь, до сети: запрос, оборвавшийся по таймауту,
             # оплачен провайдером так же, как успешный.
             self.live_calls += 1
             self.input_tokens += estimated_input_tokens
 
-    def _check(self, estimated_input_tokens: int) -> None:
+    def _check(
+        self,
+        estimated_input_tokens: int,
+        *,
+        input_price: Decimal | None,
+        output_price: Decimal | None,
+        max_output_tokens: int | None,
+    ) -> None:
         if self.max_live_calls is not None and self.live_calls >= self.max_live_calls:
             raise BudgetError(
                 f"исчерпан лимит живых вызовов: {self.live_calls} из {self.max_live_calls}"
@@ -120,14 +140,26 @@ class Budget:
                 f"запрос вышел бы за общий лимит входных токенов: {projected} "
                 f"из {self.max_total_input_tokens}"
             )
-        cost = self.projected_cost(estimated_input_tokens)
+        cost = self.projected_cost(
+            estimated_input_tokens,
+            input_price=input_price,
+            output_price=output_price,
+            max_output_tokens=max_output_tokens,
+        )
         if self.max_estimated_cost is not None and cost > self.max_estimated_cost:
             raise BudgetError(
                 f"запрос вышел бы за лимит стоимости: {cost.quantize(Decimal('0.0001'))} "
                 f"из {self.max_estimated_cost}"
             )
 
-    def projected_cost(self, estimated_input_tokens: int) -> Decimal:
+    def projected_cost(
+        self,
+        estimated_input_tokens: int,
+        *,
+        input_price: Decimal | None = None,
+        output_price: Decimal | None = None,
+        max_output_tokens: int | None = None,
+    ) -> Decimal:
         """Во что обойдётся прогон, если этот запрос уйдёт и ответит по максимуму.
 
         Считается худший случай, а не потраченное: потолок, сверяемый с уже
@@ -136,20 +168,43 @@ class Budget:
         потолок стоимости становится приблизительным — о чём сказано в справке к
         настройке.
         """
+        effective_input_price = (
+            input_price if input_price is not None else self.price_input_per_million
+        )
+        effective_output_price = (
+            output_price if output_price is not None else self.price_output_per_million
+        )
+        effective_max_output = (
+            max_output_tokens if max_output_tokens is not None else self.max_output_tokens
+        )
         return self.estimated_cost + (
-            Decimal(estimated_input_tokens) * self.price_input_per_million
-            + Decimal(self.max_output_tokens or 0) * self.price_output_per_million
+            Decimal(estimated_input_tokens) * effective_input_price
+            + Decimal(effective_max_output or 0) * effective_output_price
         ) / Decimal(1_000_000)
 
-    def record(self, input_tokens: int | None, output_tokens: int | None, estimated: int) -> None:
+    def record(
+        self,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        estimated: int,
+        *,
+        input_price: Decimal | None = None,
+        output_price: Decimal | None = None,
+    ) -> None:
         """Заменить оценку фактическими числами и досчитать стоимость."""
         with self._lock:
             if input_tokens is not None:
                 self.input_tokens += input_tokens - estimated
             self.output_tokens += output_tokens or 0
+            effective_input_price = (
+                input_price if input_price is not None else self.price_input_per_million
+            )
+            effective_output_price = (
+                output_price if output_price is not None else self.price_output_per_million
+            )
             self.estimated_cost += (
-                Decimal(input_tokens or estimated) * self.price_input_per_million
-                + Decimal(output_tokens or 0) * self.price_output_per_million
+                Decimal(input_tokens or estimated) * effective_input_price
+                + Decimal(output_tokens or 0) * effective_output_price
             ) / Decimal(1_000_000)
 
     def report(self) -> dict[str, Any]:
@@ -170,6 +225,7 @@ class Attempt:
     """Одна попытка: логическая при попадании в кэш, физическая при живом вызове."""
 
     role: Role
+    model: str
     account_id: str
     attempt: int
     physical_attempt: int
@@ -186,6 +242,7 @@ class Attempt:
     def record(self) -> dict[str, Any]:
         return {
             "role": self.role.value,
+            "model": self.model,
             "account_id": self.account_id,
             "attempt": self.attempt,
             "physical_attempt": self.physical_attempt,
@@ -347,12 +404,19 @@ class StructuredModelRunner:
             source_hashes=request.source_hashes,
         )
 
-    def run(self, request: Request, parse: Callable[[dict[str, Any]], T]) -> T:
+    def run(
+        self,
+        request: Request,
+        parse: Callable[[dict[str, Any]], T],
+        *,
+        escalate_if: EscalationReason[T] | None = None,
+    ) -> T:
         """Разобранный ответ модели или отказ.
 
         Порядок неслучаен: сначала кэш, потом бюджет, потом сеть. Промах в офлайне
         останавливает прогон в `cache.get`, до всякой попытки собрать клиента.
         """
+        del escalate_if  # Эскалация — обязанность CascadingModelRunner.
         retry_note = ""
         for attempt in range(1, self.semantic_attempts + 1):
             current = request
@@ -406,7 +470,7 @@ class StructuredModelRunner:
 
         raise InvalidResponseError(
             f"{request.role}/{request.account_id}: ответ не прошёл "
-            f"{self.semantic_attempts} смысловые попытки"
+            f"{self.semantic_attempts} смысловые попытки; последняя причина: {retry_note}"
         )
 
     def _parse(
@@ -427,7 +491,12 @@ class StructuredModelRunner:
         last: Exception | None = None
 
         for physical in range(self.transport_retries + 1):
-            self.budget.authorise(estimated)
+            self.budget.authorise(
+                estimated,
+                input_price=self.config.price_input_per_million,
+                output_price=self.config.price_output_per_million,
+                max_output_tokens=self.config.max_output_tokens,
+            )
             api_key = self.config.authorise_live_call(f"{request.role} для {request.account_id}")
             started = time.perf_counter()
             try:
@@ -439,7 +508,13 @@ class StructuredModelRunner:
                 # отклонённая до инференса схема — нет. В первом случае сохраняем
                 # консервативную оценку, во втором не показываем несуществующий расход.
                 if transport_error:
-                    self.budget.record(None, None, estimated)
+                    self.budget.record(
+                        None,
+                        None,
+                        estimated,
+                        input_price=self.config.price_input_per_million,
+                        output_price=self.config.price_output_per_million,
+                    )
                 status, code, request_id = _provider_error(exc)
                 self._log(
                     request,
@@ -456,7 +531,13 @@ class StructuredModelRunner:
                 if not transport_error or physical == self.transport_retries:
                     raise
                 continue
-            self.budget.record(usage[0], usage[1], estimated)
+            self.budget.record(
+                usage[0],
+                usage[1],
+                estimated,
+                input_price=self.config.price_input_per_million,
+                output_price=self.config.price_output_per_million,
+            )
             return (payload, usage, request_id), started, physical + 1
 
         raise RuntimeError(f"транспортные повторы исчерпаны: {last}")
@@ -479,6 +560,7 @@ class StructuredModelRunner:
         self.calls.append(
             Attempt(
                 role=request.role,
+                model=self.config.name,
                 account_id=request.account_id,
                 attempt=attempt,
                 physical_attempt=physical_attempt,
@@ -504,6 +586,67 @@ class StructuredModelRunner:
             "seconds_total": round(sum(call.latency_seconds for call in self.calls), 3),
             "budget": self.budget.report(),
         }
+
+
+@dataclass(slots=True)
+class CascadingModelRunner:
+    """Дорогая модель вызывается только после смыслового отказа основной.
+
+    Транспортная ошибка, исчерпанный баланс и бюджет проходят наружу без
+    эскалации: другая модель использует тот же API и не исправит такую причину.
+    """
+
+    primary: StructuredModelRunner
+    fallback: StructuredModelRunner
+
+    @property
+    def budget(self) -> Budget:
+        return self.primary.budget
+
+    @property
+    def calls(self) -> list[Attempt]:
+        return [*self.primary.calls, *self.fallback.calls]
+
+    def run(
+        self,
+        request: Request,
+        parse: Callable[[dict[str, Any]], T],
+        *,
+        escalate_if: EscalationReason[T] | None = None,
+    ) -> T:
+        reason: str | None
+        try:
+            result = self.primary.run(request, parse)
+        except InvalidResponseError as exc:
+            reason = f"основная модель не смогла выдать валидный ответ: {exc}"
+        else:
+            reason = escalate_if(result) if escalate_if is not None else None
+            if reason is None:
+                return result
+
+        escalated = replace(
+            request,
+            instructions=(
+                request.instructions
+                + "\n\nОсновная модель не завершила задачу. "
+                + f"Исправь причину отказа: {reason}"
+            ),
+        )
+        return self.fallback.run(escalated, parse)
+
+    def usage(self) -> dict[str, Any]:
+        live = [call for call in self.calls if not call.cache_hit]
+        return {
+            "attempts": len(self.calls),
+            "live_calls": len(live),
+            "cache_hits": len(self.calls) - len(live),
+            "invalid_responses": sum(1 for call in self.calls if not call.valid),
+            "seconds_total": round(sum(call.latency_seconds for call in self.calls), 3),
+            "budget": self.budget.report(),
+        }
+
+
+ModelRunner = StructuredModelRunner | CascadingModelRunner
 
 
 def batch_by_account(items: Sequence[tuple[str, Any]]) -> dict[str, list[Any]]:

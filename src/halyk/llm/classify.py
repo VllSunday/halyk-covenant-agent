@@ -263,10 +263,21 @@ class CategoryClassifier:
         # постфактум — значит уже его допустить.
         estimated = self._estimate(rows)
         if self.budget is not None:
-            self.budget.authorise(estimated)
+            self.budget.authorise(
+                estimated,
+                input_price=self.config.price_input_per_million,
+                output_price=self.config.price_output_per_million,
+                max_output_tokens=self.config.max_output_tokens,
+            )
         payload, usage, request_id = self._ask(rows)
         if self.budget is not None:
-            self.budget.record(usage[0], usage[1], estimated)
+            self.budget.record(
+                usage[0],
+                usage[1],
+                estimated,
+                input_price=self.config.price_input_per_million,
+                output_price=self.config.price_output_per_million,
+            )
         verdicts = self._verdicts(payload["items"], rows)
         self.calls.append(
             BatchCall(
