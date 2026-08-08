@@ -102,6 +102,15 @@
       "title": "BoundingBox",
       "type": "object"
     },
+    "Cardinality": {
+      "description": "Сколько фактов удовлетворяет требованию.",
+      "enum": [
+        "one",
+        "many"
+      ],
+      "title": "Cardinality",
+      "type": "string"
+    },
     "CompiledClause": {
       "description": "Один пункт, переведённый в исполнимую форму.",
       "properties": {
@@ -487,6 +496,15 @@
       "title": "CovenantFormula",
       "type": "object"
     },
+    "Currency": {
+      "enum": [
+        "USD",
+        "EUR",
+        "KZT"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
     "Difference": {
       "properties": {
         "left": {
@@ -689,8 +707,39 @@
       "type": "object"
     },
     "FactRequirement": {
-      "description": "Величина, без которой формулу не посчитать.\n\nОбъявляется компилятором, а находится отдельно. Разделение нужно, чтобы\nненайденная величина не превращалась в ноль: `NEEDS_RESOLUTION` — это адрес для\nследующего шага поиска, а не результат.",
+      "description": "Величина, без которой формулу не посчитать.\n\nОбъявляется компилятором, находится отдельно. Совпадения по названию вида мало:\nпорог существенности прошлого года, сумма в другой валюте и обязательство\nдочерней компании — разные величины с одним `fact_kind`. Поэтому требование\nнесёт период, единицу, валюту и область, и сопоставление идёт по ним всем.",
       "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "cardinality": {
+          "$ref": "#/$defs/Cardinality",
+          "default": "one"
+        },
+        "counterparty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Counterparty"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "description": {
           "title": "Description",
           "type": "string"
@@ -699,19 +748,56 @@
           "title": "Fact Kind",
           "type": "string"
         },
-        "group_level": {
-          "default": false,
-          "title": "Group Level",
-          "type": "boolean"
+        "materiality_floor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "period_end": {
+          "format": "date",
+          "title": "Period End",
+          "type": "string"
+        },
+        "period_start": {
+          "format": "date",
+          "title": "Period Start",
+          "type": "string"
+        },
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
         },
         "resolution": {
           "$ref": "#/$defs/Resolution",
           "default": "needs_resolution"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope",
+          "default": "borrower"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
         }
       },
       "required": [
+        "requirement_id",
+        "scenario_id",
+        "account_id",
         "fact_kind",
-        "description"
+        "description",
+        "unit",
+        "period_start",
+        "period_end"
       ],
       "title": "FactRequirement",
       "type": "object"
@@ -878,6 +964,24 @@
         "selector"
       ],
       "title": "LedgerSum",
+      "type": "object"
+    },
+    "Money": {
+      "description": "Сумма в минорных единицах вместе со своей валютой.\n\nВалюта носится с суммой, а не подразумевается снаружи: в реестре соседствуют USD\nи EUR, и сложение их без пересчёта — ошибка, которую нужно ловить типом, а не\nревью.",
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "minor": {
+          "title": "Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "currency",
+        "minor"
+      ],
+      "title": "Money",
       "type": "object"
     },
     "Operator": {
@@ -1112,10 +1216,11 @@
       "type": "string"
     },
     "Resolution": {
-      "description": "Судьба требуемого факта после сверки с детерминированным слоем.",
+      "description": "Судьба требуемой величины после сверки с детерминированным слоем.",
       "enum": [
         "resolved",
-        "needs_resolution"
+        "needs_resolution",
+        "ambiguous"
       ],
       "title": "Resolution",
       "type": "string"
@@ -1144,6 +1249,15 @@
       },
       "title": "RoundingSpec",
       "type": "object"
+    },
+    "Scope": {
+      "description": "Чья это величина.\n\nУ P5/6.1 числитель считается по консолидированной отчётности материнской\nкомпании, а знаменатель — по собственной отчётности заёмщика. Смешать их значит\nполучить правдоподобное число не про то.",
+      "enum": [
+        "borrower",
+        "group"
+      ],
+      "title": "Scope",
+      "type": "string"
     },
     "Selector": {
       "description": "Какие строки реестра попадают в величину.\n\nПустое поле означает «без ограничения по этому признаку», а не «ничего»: иначе\nлюбой селектор пришлось бы заполнять целиком, и ошибка компилятора выглядела бы\nкак осмысленный фильтр.",
@@ -1474,7 +1588,7 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Ответ модели на один документ: все пункты статьи о ковенантах.",
+  "description": "Ответ модели на одного заёмщика: все пункты его действующего договора.",
   "properties": {
     "clauses": {
       "items": {

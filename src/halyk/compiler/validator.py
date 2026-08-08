@@ -14,10 +14,12 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from halyk.compiler.contract import CompiledClause, FactRequirement, Resolution
+from halyk.compiler.contract import Cardinality, CompiledClause, FactRequirement, Resolution
+from halyk.compiler.dimensions import check as check_dimensions
 from halyk.models.classification import TransactionCategory
 from halyk.models.covenant import Unit
 from halyk.models.document import DocumentFacts, DocumentStatus
+from halyk.models.fact import Fact
 from halyk.models.formula import (
     Condition,
     ExternalMetric,
@@ -283,25 +285,49 @@ def check_requirements(clause: CompiledClause) -> list[CompilationError]:
     return found
 
 
+def candidates(requirement: FactRequirement, facts: Iterable[Fact]) -> list[Fact]:
+    """Факты, удовлетворяющие требованию целиком.
+
+    Совпадения по названию вида мало: порог прошлого периода, сумма в другой валюте
+    и обязательство дочерней компании носят один `fact_kind`. Поэтому сверяются
+    также счёт, область и контрагент — всё, что требование о себе объявило.
+    """
+    found = []
+    for fact in facts:
+        if fact.kind != requirement.fact_kind:
+            continue
+        if fact.account_id != requirement.account_id:
+            continue
+        stated = getattr(fact, "counterparty", None)
+        if requirement.counterparty and stated != requirement.counterparty:
+            continue
+        found.append(fact)
+    return found
+
+
 def resolve_requirements(
-    clause: CompiledClause, available: Iterable[str]
+    clause: CompiledClause, facts: Iterable[Fact]
 ) -> tuple[FactRequirement, ...]:
     """Отметить, какие требуемые величины нашёл детерминированный слой.
 
     Ненайденная величина не обнуляется и не выбрасывается: она остаётся с пометкой
     `NEEDS_RESOLUTION` и становится входом следующего шага поиска.
+
+    Несколько подходящих фактов — это `AMBIGUOUS`, а не «возьмём первый»: выбор по
+    порядку чтения документов дал бы ответ, зависящий от имён файлов.
     """
-    present = set(available)
-    return tuple(
-        item.model_copy(
-            update={
-                "resolution": Resolution.RESOLVED
-                if item.fact_kind in present
-                else Resolution.NEEDS_RESOLUTION
-            }
-        )
-        for item in clause.required_facts
-    )
+    available = list(facts)
+    resolved = []
+    for item in clause.required_facts:
+        matched = candidates(item, available)
+        if not matched:
+            outcome = Resolution.NEEDS_RESOLUTION
+        elif len(matched) > 1 and item.cardinality is Cardinality.ONE:
+            outcome = Resolution.AMBIGUOUS
+        else:
+            outcome = Resolution.RESOLVED
+        resolved.append(item.model_copy(update={"resolution": outcome}))
+    return tuple(resolved)
 
 
 def check_coverage(
@@ -339,4 +365,8 @@ def validate(
         *check_selectors(clause),
         *check_units(clause),
         *check_requirements(clause),
+        *[
+            CompilationError(code="dimension_mismatch", path=error.path, detail=error.detail)
+            for error in check_dimensions(clause)
+        ],
     ]

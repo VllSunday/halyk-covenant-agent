@@ -11,7 +11,13 @@ from decimal import Decimal
 
 import pytest
 
-from halyk.compiler.contract import CompiledClause, FactRequirement, Resolution
+from halyk.compiler.contract import (
+    Cardinality,
+    CompiledClause,
+    FactRequirement,
+    Resolution,
+    Scope,
+)
 from halyk.compiler.validator import (
     ALLOWED_OPS,
     check_coverage,
@@ -23,6 +29,7 @@ from halyk.models import formula as ast
 from halyk.models.classification import TransactionCategory as Cat
 from halyk.models.covenant import Operator, Unit
 from halyk.models.document import DocumentFacts, DocumentKind, DocumentStatus, PageFacts
+from halyk.models.fact import OneOffPolicyFact
 from halyk.models.formula import (
     Condition,
     Constant,
@@ -36,6 +43,7 @@ from halyk.models.formula import (
     Selector,
 )
 from halyk.models.source import SourceRef
+from halyk.money import Currency, Money
 
 QUOTE = "капитальные затраты не превышают $300,000.00"
 PAGE_TEXT = f"Статья 6 — Финансовые ковенанты\nПункт 6.1. За период {QUOTE} за год."
@@ -81,6 +89,20 @@ def clause(**overrides: object) -> CompiledClause:
         "period_end": date(2025, 12, 31),
     }
     return CompiledClause(**(base | overrides))  # type: ignore[arg-type]
+
+
+def need(kind: str, unit: Unit = Unit.MONEY, **overrides: object) -> FactRequirement:
+    base: dict[str, object] = {
+        "requirement_id": f"req-{kind}",
+        "scenario_id": "P1",
+        "account_id": "ACC-7801",
+        "fact_kind": kind,
+        "description": kind,
+        "unit": unit,
+        "period_start": date(2025, 1, 1),
+        "period_end": date(2025, 12, 31),
+    }
+    return FactRequirement(**(base | overrides))  # type: ignore[arg-type]
 
 
 def codes(errors: list) -> set[str]:  # type: ignore[type-arg]
@@ -240,9 +262,7 @@ def test_undeclared_external_metric_is_rejected() -> None:
 
 
 def test_declared_but_unused_fact_is_reported() -> None:
-    item = clause(
-        required_facts=(FactRequirement(fact_kind="one_off_item", description="разовые"),)
-    )
+    item = clause(required_facts=(need("one_off_item"),))
     assert "fact_is_not_used" in codes(check_requirements(item))
 
 
@@ -254,7 +274,7 @@ def test_declared_fact_passes() -> None:
                 right=FactValue(fact_kind="one_off_item"),
             )
         },
-        required_facts=(FactRequirement(fact_kind="one_off_item", description="разовые"),),
+        required_facts=(need("one_off_item"),),
     )
     assert check_requirements(item) == []
 
@@ -262,21 +282,25 @@ def test_declared_fact_passes() -> None:
 # --- разрешение требований ----------------------------------------------------
 
 
-def test_found_fact_becomes_resolved() -> None:
-    item = clause(
-        required_facts=(FactRequirement(fact_kind="one_off_policy", description="порог"),)
+def policy_fact(account: str = "ACC-7801") -> OneOffPolicyFact:
+    return OneOffPolicyFact(
+        account_id=account,
+        source=source(),
+        minimum=Money.from_decimal(300000, Currency.USD),
     )
-    resolved = resolve_requirements(item, ["one_off_policy", "ppe_roll_forward"])
+
+
+def test_found_fact_becomes_resolved() -> None:
+    item = clause(required_facts=(need("one_off_policy"),))
+    resolved = resolve_requirements(item, [policy_fact()])
     assert resolved[0].resolution is Resolution.RESOLVED
     assert not resolved[0].is_open
 
 
 def test_missing_fact_stays_open_for_the_next_step() -> None:
     """Ненайденная величина не обнуляется: она адрес следующего шага поиска."""
-    item = clause(
-        required_facts=(FactRequirement(fact_kind="group_capex", description="капзатраты группы"),)
-    )
-    resolved = resolve_requirements(item, ["one_off_policy"])
+    item = clause(required_facts=(need("group_capex"),))
+    resolved = resolve_requirements(item, [policy_fact()])
     assert resolved[0].resolution is Resolution.NEEDS_RESOLUTION
     assert item.model_copy(update={"required_facts": resolved}).open_requirements
 
@@ -285,3 +309,172 @@ def test_unresolved_terms_are_carried() -> None:
     """То, что модель не смогла перевести, обязано доехать до отчёта."""
     item = clause(unresolved_terms=("средневзвешенная стоимость капитала",))
     assert item.unresolved_terms == ("средневзвешенная стоимость капитала",)
+
+
+# --- размерности --------------------------------------------------------------
+
+
+def test_money_plus_ratio_is_rejected() -> None:
+    """Формально валидное и бессмысленное дерево: исполнитель досчитал бы его."""
+    assert "dimension_mismatch" in run(
+        clause(
+            formula={
+                "measure": ast.Sum(
+                    terms=(
+                        LedgerSum(selector=Selector(categories=(Cat.CAPEX,))),
+                        Ratio(
+                            numerator=LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
+                            denominator=LedgerSum(selector=Selector(categories=(Cat.OPEX,))),
+                        ),
+                    )
+                )
+            }
+        )
+    )
+
+
+def test_count_and_money_do_not_mix() -> None:
+    assert "dimension_mismatch" in run(
+        clause(
+            formula={
+                "measure": ast.Sum(
+                    terms=(
+                        LedgerSum(selector=Selector(categories=(Cat.CAPEX,))),
+                        ast.LedgerCount(selector=Selector(categories=(Cat.CAPEX,))),
+                    )
+                )
+            }
+        )
+    )
+
+
+def test_money_over_money_is_a_ratio() -> None:
+    assert (
+        run(
+            clause(
+                formula={
+                    "measure": Ratio(
+                        numerator=LedgerSum(selector=Selector(categories=(Cat.CAPEX,))),
+                        denominator=LedgerSum(selector=Selector(categories=(Cat.OPEX,))),
+                    ),
+                    "unit": Unit.RATIO,
+                    "threshold": Constant(value=Decimal("0.5")),
+                }
+            )
+        )
+        == set()
+    )
+
+
+def test_declared_unit_must_match_the_tree() -> None:
+    """Отношение, объявленное деньгами, уехало бы в ответ не в той единице."""
+    assert "dimension_mismatch" in run(
+        clause(
+            formula={
+                "measure": Ratio(
+                    numerator=LedgerSum(selector=Selector(categories=(Cat.CAPEX,))),
+                    denominator=LedgerSum(selector=Selector(categories=(Cat.OPEX,))),
+                ),
+                "unit": Unit.MONEY,
+            }
+        )
+    )
+
+
+def test_fact_dimension_comes_from_the_requirement() -> None:
+    """EBITDA плюс разовая статья: обе денежные, сложение законно."""
+    assert (
+        run(
+            clause(
+                formula={
+                    "measure": ast.Sum(
+                        terms=(
+                            LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
+                            FactValue(fact_kind="one_off_item"),
+                        )
+                    )
+                },
+                required_facts=(need("one_off_item", Unit.MONEY),),
+            )
+        )
+        == set()
+    )
+
+
+def test_fact_with_the_wrong_unit_breaks_the_sum() -> None:
+    assert "dimension_mismatch" in run(
+        clause(
+            formula={
+                "measure": ast.Sum(
+                    terms=(
+                        LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
+                        FactValue(fact_kind="coverage_share"),
+                    )
+                )
+            },
+            required_facts=(need("coverage_share", Unit.RATIO),),
+        )
+    )
+
+
+def test_product_of_two_dimensional_values_is_rejected() -> None:
+    assert "dimension_mismatch" in run(
+        clause(
+            formula={
+                "measure": ast.Product(
+                    factors=(
+                        LedgerSum(selector=Selector(categories=(Cat.CAPEX,))),
+                        LedgerSum(selector=Selector(categories=(Cat.OPEX,))),
+                    )
+                )
+            }
+        )
+    )
+
+
+def test_scaling_money_by_a_constant_is_allowed() -> None:
+    assert (
+        run(
+            clause(
+                formula={
+                    "measure": ast.Product(
+                        factors=(
+                            LedgerSum(selector=Selector(categories=(Cat.CAPEX,))),
+                            Constant(value=Decimal("1.5")),
+                        )
+                    )
+                }
+            )
+        )
+        == set()
+    )
+
+
+# --- строгое сопоставление требований -----------------------------------------
+
+
+def test_fact_of_another_borrower_does_not_resolve() -> None:
+    """Совпадения по названию вида мало: счёт обязан совпасть тоже."""
+    item = clause(required_facts=(need("one_off_policy"),))
+    resolved = resolve_requirements(item, [policy_fact(account="ACC-9999")])
+    assert resolved[0].resolution is Resolution.NEEDS_RESOLUTION
+
+
+def test_two_matching_facts_are_ambiguous() -> None:
+    """Выбор первого попавшегося зависел бы от порядка чтения файлов."""
+    item = clause(required_facts=(need("one_off_policy", cardinality=Cardinality.ONE),))
+    resolved = resolve_requirements(item, [policy_fact(), policy_fact()])
+    assert resolved[0].resolution is Resolution.AMBIGUOUS
+    assert resolved[0].is_open
+
+
+def test_many_cardinality_accepts_several_facts() -> None:
+    item = clause(required_facts=(need("one_off_policy", cardinality=Cardinality.MANY),))
+    resolved = resolve_requirements(item, [policy_fact(), policy_fact()])
+    assert resolved[0].resolution is Resolution.RESOLVED
+
+
+def test_group_scope_is_carried_into_the_requirement() -> None:
+    """P5/6.1: числитель по группе, знаменатель по заёмщику."""
+    item = clause(required_facts=(need("ppe_roll_forward", scope=Scope.GROUP),))
+    assert item.required_facts[0].scope is Scope.GROUP
