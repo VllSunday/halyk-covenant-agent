@@ -78,28 +78,59 @@ def _model_input(transaction: NormalisedTransaction) -> TransactionInput:
     )
 
 
-def _document_category(transaction: NormalisedTransaction) -> TransactionCategory | None:
-    """Категория, названную документом, приводим к нашей онтологии.
+# Формулировки, которыми документы называют статью, на обоих языках. Сравнение идёт
+# по началу строки: в русском формулировки различаются падежом, в английском —
+# числом и наличием артикля. Список отсортирован по длине, чтобы «operating costs»
+# не перехватывалось более коротким «operating».
+_STATED_CATEGORIES: tuple[tuple[str, TransactionCategory], ...] = tuple(
+    sorted(
+        {
+            "процентные расходы": TransactionCategory.INTEREST_EXPENSE,
+            "операционные расходы": TransactionCategory.OPEX,
+            "коммунальные услуги": TransactionCategory.UTILITIES,
+            "расходы на оплату труда": TransactionCategory.PAYROLL,
+            "налоги": TransactionCategory.TAXES,
+            "страховые премии": TransactionCategory.INSURANCE_PREMIUM,
+            "капитальные затраты": TransactionCategory.CAPEX,
+            "консультационные услуги": TransactionCategory.OTHER,
+            "выручка": TransactionCategory.REVENUE,
+            "interest expense": TransactionCategory.INTEREST_EXPENSE,
+            "finance cost": TransactionCategory.INTEREST_EXPENSE,
+            "operating cost": TransactionCategory.OPEX,
+            "operating expense": TransactionCategory.OPEX,
+            "utilities": TransactionCategory.UTILITIES,
+            "utility": TransactionCategory.UTILITIES,
+            "payroll": TransactionCategory.PAYROLL,
+            "staff cost": TransactionCategory.PAYROLL,
+            "employee benefit": TransactionCategory.PAYROLL,
+            "tax": TransactionCategory.TAXES,
+            "insurance premium": TransactionCategory.INSURANCE_PREMIUM,
+            "capital expenditure": TransactionCategory.CAPEX,
+            "capital cost": TransactionCategory.CAPEX,
+            "advisory service": TransactionCategory.OTHER,
+            "consulting service": TransactionCategory.OTHER,
+            "revenue": TransactionCategory.REVENUE,
+            "rent": TransactionCategory.RENT,
+            "lease payment": TransactionCategory.RENT,
+            "аренда": TransactionCategory.RENT,
+            "арендные платежи": TransactionCategory.RENT,
+        }.items(),
+        key=lambda pair: -len(pair[0]),
+    )
+)
 
-    Документ пишет по-русски и своими словами: «Процентные расходы», «Страховые
-    премии». Совпадение проверяется по началу строки, потому что формулировки в
-    разных документах различаются падежом.
+
+def _document_category(transaction: NormalisedTransaction) -> TransactionCategory | None:
+    """Категорию, названную документом, приводим к нашей онтологии.
+
+    Документ пишет своими словами и на своём языке: «Процентные расходы»,
+    «Operating costs». Неотображаемая формулировка не уходит правилам — операция
+    становится нерешённой, потому что молча проигнорировать вывод аудитора нельзя.
     """
     stated = (transaction.covenant_category or "").strip().lower()
     if not stated:
         return None
-    known = {
-        "процентные расходы": TransactionCategory.INTEREST_EXPENSE,
-        "операционные расходы": TransactionCategory.OPEX,
-        "коммунальные услуги": TransactionCategory.UTILITIES,
-        "расходы на оплату труда": TransactionCategory.PAYROLL,
-        "налоги": TransactionCategory.TAXES,
-        "страховые премии": TransactionCategory.INSURANCE_PREMIUM,
-        "капитальные затраты": TransactionCategory.CAPEX,
-        "консультационные услуги": TransactionCategory.OTHER,
-        "выручка": TransactionCategory.REVENUE,
-    }
-    for phrase, category in known.items():
+    for phrase, category in _STATED_CATEGORIES:
         if stated.startswith(phrase):
             return category
     return None

@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from halyk.money import Currency, Money, parse_money
 
@@ -32,7 +32,28 @@ _FOOTER = re.compile(
 
 _AMOUNT = r"\$\s?[\d][\d,]*(?:\.\d{2})?"
 _TXN = r"TXN-[A-Z0-9]+-\d+"
-_DATE = r"\d{4}-\d{2}-\d{2}"
+# Дата в раскрытиях приходит в ISO, но англоязычный документ может написать её
+# прописью. Оба начертания разбираются одной функцией, чтобы дальше по коду разницы
+# не было.
+_MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+_DATE = (
+    r"\d{4}-\d{2}-\d{2}"
+    r"|\d{1,2}\s+(?:" + "|".join(_MONTHS) + r")\s+\d{4}"
+    r"|(?:" + "|".join(_MONTHS) + r")\s+\d{1,2},?\s+\d{4}"
+)
 
 # Каждое раскрытие описано парой шаблонов: русским и английским. Именованные группы у
 # них одинаковые, поэтому дальше по коду язык уже неразличим — обе ветви дают один и
@@ -200,6 +221,25 @@ def _money(raw: str) -> Money:
     return parse_money(raw)
 
 
+def parse_date(raw: str) -> date:
+    """Дата раскрытия: ISO или английская пропись.
+
+    Приводится к одному типу здесь, чтобы ни корректировки, ни исполнитель не знали,
+    в каком начертании она была напечатана.
+    """
+    text = raw.strip()
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+    for fmt in ("%d %B %Y", "%B %d %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(text, fmt).date()  # noqa: DTZ007
+        except ValueError:
+            continue
+    raise ValueError(f"Не разобрал дату {raw!r}")
+
+
 def _first(patterns: tuple[re.Pattern[str], ...], text: str) -> re.Match[str] | None:
     """Первое совпадение из языковых вариантов шаблона.
 
@@ -312,7 +352,7 @@ def effective_period(item: Disclosure) -> tuple[str, date] | None:
     match = _first(_RENDERED_IN, item.body)
     if match is None:
         return None
-    return match.group("txn_id"), date.fromisoformat(match.group("start"))
+    return match.group("txn_id"), parse_date(match.group("start"))
 
 
 def is_actionable(item: Disclosure) -> bool:

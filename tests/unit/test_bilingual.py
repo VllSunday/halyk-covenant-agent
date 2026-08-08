@@ -14,6 +14,7 @@ import pytest
 
 from halyk.knowledge import notes
 from halyk.knowledge.authority import referenced_report
+from halyk.knowledge.classifier import _STATED_CATEGORIES
 from halyk.knowledge.kyc import parse_collateral_policy, parse_related_party_policy
 from halyk.knowledge.ppe import parse_ppe_movement
 from halyk.knowledge.router import detect_kind, detect_organisation, detect_status, squeeze
@@ -377,3 +378,52 @@ def test_ppe_movement_agrees_across_languages() -> None:
     )
     assert russian == english
     assert russian.additions == Decimal("30000.00")
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["2024-11-01", "1 November 2024", "November 1, 2024", "November 1 2024"],
+)
+def test_dates_are_read_in_both_notations(written: str) -> None:
+    """ISO и английская пропись дают одну дату: дальше по коду разницы быть не должно."""
+    found = notes.effective_period(
+        item(
+            f"Transaction TXN-P6-0021 (invoice dated 2025-01-10) relates to services "
+            f"rendered in the period from {written}"
+        )
+    )
+    assert found == ("TXN-P6-0021", date(2024, 11, 1))
+
+
+def test_kyc_markdown_table_is_read_in_english() -> None:
+    """Из распознавания таблица приходит строками Markdown, а не колонкой."""
+    policy = parse_related_party_policy(
+        "Share of voting rights\n"
+        "| Entity | Share |\n"
+        "| Aktau Holdings LLP | 35.0% |\n"
+        "| Kaspi Mining LLP | 18.7% |\n"
+        "Entities in which the Group holds 20.0% or more of voting rights are treated "
+        "as related parties.\n"
+    )
+    assert policy.threshold == Decimal("0.20")
+    assert policy.related_parties == ("Aktau Holdings LLP",)
+
+
+@pytest.mark.parametrize(
+    ("stated", "expected"),
+    [
+        ("Операционные расходы", "opex"),
+        ("Operating costs", "opex"),
+        ("Interest expense", "interest_expense"),
+        ("Capital expenditure", "capex"),
+        ("Payroll", "payroll"),
+        ("Revenue", "revenue"),
+    ],
+)
+def test_document_stated_category_is_language_neutral(stated: str, expected: str) -> None:
+    """Категорию, названную документом, надо понять — иначе операция станет нерешённой."""
+    match = next(
+        (category for phrase, category in _STATED_CATEGORIES if stated.lower().startswith(phrase)),
+        None,
+    )
+    assert match is not None and match.value == expected
