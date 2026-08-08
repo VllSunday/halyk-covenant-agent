@@ -27,14 +27,30 @@ from halyk.models.document import DocumentFacts, DocumentKind, DocumentStatus
 # и в регламенте, и в еженедельной сводке. Значима именно их плотность.
 _MONEY = re.compile(r"\$\s?[\d,]+\.\d{2}")
 
-# Граница измерена на открытом наборе: у 145 посторонних документов сумм не больше
-# одной, у содержательных — три и выше, а в отчётности два-три десятка. Порог стоит
-# между наблюдёнными значениями, а не назначен на глаз.
-#
-# Номер счёта в признаки не годится, хотя и кажется очевидным: еженедельные сводки и
-# регламенты приманок его упоминают, и по нему проверка даёт двенадцать ложных
-# срабатываний на открытом наборе.
+# Граница плотности измерена на открытом наборе: у 145 посторонних документов сумм не
+# больше одной, у содержательных — три и выше, а в отчётности два-три десятка.
 _FINANCIAL_SUBSTANCE = 3
+
+# Одной плотности сумм мало. Короткое допсоглашение может нести единственный новый
+# порог и при этом решать ячейку целиком, а по числу сумм не отличаться от служебной
+# записки. Поэтому признаки складываются: каждый весит балл, значимым считается
+# документ, набравший два.
+#
+# Номер счёта сам по себе в признаки не годится, хотя и напрашивается: еженедельные
+# сводки и регламенты приманок его упоминают и дают двенадцать ложных срабатываний.
+# В сумме с другим признаком он уже осмыслен.
+_CLAUSE_NUMBER = re.compile(r"(?:Пункт|Clause|Статья|Article)\s+\d+(?:\.\d+)?")
+_ACCOUNT = re.compile(r"ACC-\d{4}")
+# Слова, которые обещают обязательство, а не рассказ о процессе. «KYC» и «комплаенс»
+# сюда не входят намеренно: ими полны регламенты приманок, а настоящее досье и так
+# опознаётся собственными маркерами типа.
+_CONTRACT_WORDS = re.compile(
+    r"ковенант|допсоглашени|дополнительн\w+ соглашени|отказ от прав|аудированн"
+    r"|covenant|loan agreement|amendment|waiver|audited",
+    re.IGNORECASE,
+)
+_TABLE_ROW = re.compile(r"^\|.*\|.*\|", re.M)
+_SIGNIFICANT_SIGNALS = 2
 
 
 class Severity(StrEnum):
@@ -60,15 +76,33 @@ class Violation:
         }
 
 
+def relevance_signals(text: str) -> tuple[str, ...]:
+    """Структурные признаки значимости документа.
+
+    Возвращаются поимённо, а не одним числом: в отчёте по ним видно, чем именно
+    документ похож на значимый, и спорный случай разбирается без повторного чтения.
+    """
+    found: list[str] = []
+    if len(_MONEY.findall(text)) >= _FINANCIAL_SUBSTANCE:
+        found.append("money")
+    if _CLAUSE_NUMBER.search(text):
+        found.append("clause_number")
+    if _ACCOUNT.search(text):
+        found.append("account")
+    if _CONTRACT_WORDS.search(text):
+        found.append("contract_vocabulary")
+    if len(_TABLE_ROW.findall(text)) >= 2:
+        found.append("table")
+    return tuple(found)
+
+
 def _looks_relevant(document: DocumentFacts) -> bool:
     """Похож ли нераспознанный документ на значимый.
 
     Проверка нужна ровно для случая, который мы уже пропустили однажды: тип не
     определился, документ ушёл в шум, а в нём лежала величина для ковенанта.
-    Судим по плотности денежных сумм — единственному признаку, который на открытом
-    наборе разделяет содержательные документы и приманки без пересечения.
     """
-    return len(_MONEY.findall(document.text)) >= _FINANCIAL_SUBSTANCE
+    return len(relevance_signals(document.text)) >= _SIGNIFICANT_SIGNALS
 
 
 def check_documents(inventory: DatasetInventory) -> list[Violation]:
@@ -86,7 +120,8 @@ def check_documents(inventory: DatasetInventory) -> list[Violation]:
                 severity=Severity.ERROR,
                 message=(
                     f"документ не отнесён ни к одному типу, но содержит признаки "
-                    f"значимого (язык: {document.language_hint})"
+                    f"значимого: {', '.join(relevance_signals(document.text))} "
+                    f"(язык: {document.language_hint})"
                 ),
                 subject=document.file_name,
             )

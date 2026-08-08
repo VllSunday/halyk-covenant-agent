@@ -17,6 +17,7 @@ from halyk.verification.invariants import (
     check_coverage,
     check_documents,
     check_facts,
+    relevance_signals,
     summarise,
 )
 
@@ -79,16 +80,58 @@ def test_noise_document_is_not_reported() -> None:
     assert check_documents(inventory(document("agreement.pdf"), noise)) == []
 
 
+def test_compliance_procedure_is_not_reported() -> None:
+    """Регламент «о периодическом обновлении KYC» — процесс, а не обязательство."""
+    procedure = document(
+        "procedure.pdf",
+        kind=DocumentKind.UNRELATED,
+        account=None,
+        text="Процедура комплаенса — периодическое обновление KYC. Счёт ACC-7801.",
+    )
+    assert check_documents(inventory(document("agreement.pdf"), procedure)) == []
+
+
+def test_short_amendment_with_one_amount_is_reported() -> None:
+    """Одной денежной плотности мало: допсоглашение решает ячейку одной строкой."""
+    amendment = document(
+        "amendment.pdf",
+        kind=DocumentKind.UNRELATED,
+        account=None,
+        text=(
+            "Дополнительное соглашение № 2 к Договору банковского займа. "
+            "Пункт 6.3 излагается в новой редакции: порог не более $450,000.00. "
+            "Счёт ACC-7801."
+        ),
+    )
+    found = check_documents(inventory(document("agreement.pdf"), amendment))
+    assert codes(found) == {"unclassified_but_relevant"}
+    assert "clause_number" in found[0].message
+
+
+def test_signals_are_named_in_the_message() -> None:
+    """По отчёту должно быть видно, чем документ похож на значимый."""
+    assert set(relevance_signals(f"Пункт 6.1 covenant {MONEY_TABLE} ACC-7801")) == {
+        "money",
+        "clause_number",
+        "account",
+        "contract_vocabulary",
+    }
+
+
 # --- срабатывание на испорченных ---------------------------------------------
 
 
 def test_unclassified_document_with_money_is_reported() -> None:
-    """Так был потерян консолидированный отчёт: тип не распознан, документ в шуме."""
+    """Так был потерян консолидированный отчёт: тип не распознан, документ в шуме.
+
+    Признаки взяты с настоящего файла: денежная плотность и договорная лексика
+    («audited»). Номера счёта в нём нет вовсе, поэтому по счёту он не нашёлся бы.
+    """
     orphan = document(
         "report.pdf",
         kind=DocumentKind.UNRELATED,
         account=None,
-        text=f"CONSOLIDATED SOMETHING {MONEY_TABLE}",
+        text=f"Consolidated Financial Statements, audited. {MONEY_TABLE}",
     )
     found = check_documents(inventory(document("agreement.pdf"), orphan))
     assert codes(found) == {"unclassified_but_relevant"}
