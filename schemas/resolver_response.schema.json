@@ -1,0 +1,425 @@
+{
+  "$defs": {
+    "AdjustmentAction": {
+      "enum": [
+        "reclassify",
+        "set_missing_amount",
+        "exclude",
+        "set_effective_date",
+        "convert_currency",
+        "review_no_change"
+      ],
+      "title": "AdjustmentAction",
+      "type": "string"
+    },
+    "Currency": {
+      "enum": [
+        "USD",
+        "EUR",
+        "KZT"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
+    "Derivation": {
+      "description": "Величина, которой в отчётности нет строкой, но которая из неё выводится.",
+      "properties": {
+        "amount": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Amount",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fact_kind": {
+          "title": "Fact Kind",
+          "type": "string"
+        },
+        "identity": {
+          "title": "Identity",
+          "type": "string"
+        },
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "terms": {
+          "items": {
+            "$ref": "#/$defs/DerivationTerm"
+          },
+          "minItems": 2,
+          "title": "Terms",
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "fact_kind",
+        "unit",
+        "identity",
+        "terms",
+        "amount",
+        "confidence"
+      ],
+      "title": "Derivation",
+      "type": "object"
+    },
+    "DerivationTerm": {
+      "description": "Одно раскрытое число, входящее в выводимую величину.",
+      "properties": {
+        "amount": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Amount",
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "sign": {
+          "$ref": "#/$defs/Sign"
+        }
+      },
+      "required": [
+        "label",
+        "sign",
+        "amount",
+        "evidence"
+      ],
+      "title": "DerivationTerm",
+      "type": "object"
+    },
+    "Evidence": {
+      "description": "Адрес утверждения: где напечатано и что именно там написано.",
+      "properties": {
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "quote": {
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_name",
+        "page",
+        "quote"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "ProposedAdjustment": {
+      "description": "Изменение операции, предписанное документом.\n\nПоля обязательные для конкретного действия проверяются не здесь, а при сборке\nнастоящей корректировки: там уже есть модель на каждое действие, и повторять её\nограничения на проводе значило бы держать два описания одного контракта.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/AdjustmentAction"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "considered": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Considered"
+        },
+        "counterparty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Counterparty"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "effective_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective Date"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "from_currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "new_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Value"
+        },
+        "old_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Value"
+        },
+        "rate": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector_amount": {
+          "anyOf": [
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selector Amount"
+        },
+        "selector_currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "to_currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "action",
+        "reason",
+        "evidence"
+      ],
+      "title": "ProposedAdjustment",
+      "type": "object"
+    },
+    "ResolvedFact": {
+      "description": "Величина, прочитанная под конкретное требование компилятора.",
+      "properties": {
+        "amount": {
+          "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+          "title": "Amount",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "fact_kind": {
+          "title": "Fact Kind",
+          "type": "string"
+        },
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "fact_kind",
+        "amount",
+        "unit",
+        "evidence",
+        "confidence"
+      ],
+      "title": "ResolvedFact",
+      "type": "object"
+    },
+    "Sign": {
+      "description": "Знак слагаемого в выводимой величине.",
+      "enum": [
+        "plus",
+        "minus"
+      ],
+      "title": "Sign",
+      "type": "string"
+    },
+    "Unit": {
+      "enum": [
+        "money",
+        "ratio",
+        "percent",
+        "count",
+        "days"
+      ],
+      "title": "Unit",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Ответ модели на одного заёмщика.\n\nВсе три списка пустые — законный ответ: он означает, что в документах заёмщика\nничего под открытые требования не нашлось, и это честнее выдуманного числа.",
+  "properties": {
+    "adjustments": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProposedAdjustment"
+      },
+      "title": "Adjustments",
+      "type": "array"
+    },
+    "derivations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Derivation"
+      },
+      "title": "Derivations",
+      "type": "array"
+    },
+    "facts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ResolvedFact"
+      },
+      "title": "Facts",
+      "type": "array"
+    }
+  },
+  "title": "ResolverResponse",
+  "type": "object"
+}

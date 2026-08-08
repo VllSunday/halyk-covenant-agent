@@ -23,6 +23,7 @@ from halyk.models.lineage import LineageRecord
 from halyk.models.manifest import RunManifest
 from halyk.models.metrics import RunMetrics
 from halyk.models.submission import Submission
+from halyk.resolution.contract import ResolverResponse
 
 # Размеченные объединения выгружаются через TypeAdapter: схема одной ветки не
 # описала бы артефакт, в котором лежат все.
@@ -37,6 +38,7 @@ EXPORTED: dict[str, type[BaseModel] | TypeAdapter[Any]] = {
     "normalised_transaction": NormalisedTransaction,
     "run_manifest": RunManifest,
     "metrics": RunMetrics,
+    "resolver_response": ResolverResponse,
     "submission": Submission,
 }
 

@@ -72,6 +72,11 @@ def _flatten(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip().casefold()
 
 
+def contains_quote(text: str, quote: str) -> bool:
+    """Цитата стоит в тексте дословно, с точностью до переносов."""
+    return _flatten(quote) in _flatten(text)
+
+
 def walk(node: Quantity, path: str = "measure") -> Iterable[tuple[str, Quantity]]:
     """Все узлы дерева вместе с их адресами."""
     yield path, node
@@ -168,7 +173,7 @@ def check_quote(
                 )
             )
             continue
-        if _flatten(clause.formula.quote) not in _flatten(pages[0].text):
+        if not contains_quote(pages[0].text, clause.formula.quote):
             found.append(
                 CompilationError(
                     code="quote_is_not_found",
