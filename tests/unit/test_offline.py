@@ -127,6 +127,12 @@ def test_settings_separate_per_call_and_total_token_limits(
     assert settings.compiler.max_output_tokens == 16000
 
 
+def test_compiler_has_a_longer_configurable_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HALYK_COMPILER_TIMEOUT_SECONDS", "210")
+
+    assert Settings.from_env().compiler.timeout_seconds == 210
+
+
 def test_old_input_limit_name_remains_a_total_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HALYK_MAX_TOTAL_INPUT_TOKENS", raising=False)
     monkeypatch.setenv("HALYK_MAX_INPUT_TOKENS", "90000")

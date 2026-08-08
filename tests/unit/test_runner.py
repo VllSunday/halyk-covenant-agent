@@ -53,9 +53,13 @@ class Responder:
     def __init__(self, *outcomes: Any) -> None:
         self.outcomes = list(outcomes)
         self.sent = 0
+        self.requests: list[Request] = []
 
     def __call__(self, *args: object, **kwargs: object) -> Any:
         self.sent += 1
+        candidate = args[1] if len(args) > 1 else None
+        if isinstance(candidate, Request):
+            self.requests.append(candidate)
         outcome = self.outcomes[min(self.sent - 1, len(self.outcomes) - 1)]
         if isinstance(outcome, Exception):
             raise outcome
@@ -298,6 +302,7 @@ def test_invalid_answer_triggers_one_semantic_retry(tmp_path: Path) -> None:
 
     assert engine.run(request(), parse) == 42
     assert responder.sent == 2
+    assert "KeyError" in responder.requests[1].instructions
     assert engine.usage()["invalid_responses"] == 1
 
 

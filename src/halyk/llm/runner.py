@@ -20,7 +20,7 @@ import json
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Protocol, TypeVar
@@ -40,8 +40,8 @@ CHARS_PER_TOKEN = 3
 # или контракта, и повторять её бессмысленно.
 _TRANSPORT_MARKERS = ("timeout", "429", "500", "502", "503", "504", "connection", "overloaded")
 _SEMANTIC_RETRY_INSTRUCTION = (
-    "\n\nПредыдущий ответ не прошёл разбор по схеме. Верни ответ строго по схеме, "
-    "без пояснений вокруг него."
+    "\n\nПредыдущий ответ не прошёл автоматическую проверку. Исправь указанную "
+    "ошибку и верни ответ строго по схеме, без пояснений вокруг него."
 )
 
 
@@ -348,24 +348,36 @@ class StructuredModelRunner:
         Порядок неслучаен: сначала кэш, потом бюджет, потом сеть. Промах в офлайне
         останавливает прогон в `cache.get`, до всякой попытки собрать клиента.
         """
+        retry_note = ""
         for attempt in (1, 2):
-            key = self.key(request, attempt=attempt)
+            current = request
+            if retry_note:
+                current = replace(
+                    request,
+                    instructions=(
+                        request.instructions
+                        + "\n\nПричина отказа предыдущего ответа: "
+                        + retry_note
+                    ),
+                )
+            key = self.key(current, attempt=attempt)
             if (cached := self.cache.get(key)) is not None:
                 started = time.perf_counter()
                 parsed, note = self._parse(cached, parse)
-                self._log(request, attempt, True, started, parsed is not None, note=note)
+                self._log(current, attempt, True, started, parsed is not None, note=note)
                 if parsed is not None:
                     return parsed
                 # Испорченная запись — повод пойти на следующую попытку, а не сдаться:
                 # у неё свой ключ и своё содержимое.
+                retry_note = note
                 continue
 
             # Отсчёт идёт до обращения наружу: задержка живого вызова — это в первую
             # очередь ожидание ответа, и метрика без него мерила бы скорость разбора.
-            (payload, usage, request_id), started, physical_attempt = self._ask(request, attempt)
+            (payload, usage, request_id), started, physical_attempt = self._ask(current, attempt)
             parsed, note = self._parse(payload, parse)
             self._log(
-                request,
+                current,
                 attempt,
                 False,
                 started,
@@ -380,6 +392,7 @@ class StructuredModelRunner:
                 # обычным образом, воспроизводил бы ошибку на каждом прогоне.
                 self.cache.put(key, payload)
                 return parsed
+            retry_note = note
 
         raise InvalidResponseError(
             f"{request.role}/{request.account_id}: ответ не разобрался ни с первого раза, "

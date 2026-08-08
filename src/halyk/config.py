@@ -106,6 +106,7 @@ class Settings:
                 name=os.getenv("HALYK_COMPILER_MODEL", DEFAULT_MODEL),
                 api_key=api_key,
                 reasoning_effort=os.getenv("HALYK_COMPILER_EFFORT", "high"),
+                timeout_seconds=float(os.getenv("HALYK_COMPILER_TIMEOUT_SECONDS", "180")),
                 max_output_tokens=max_output_tokens,
                 offline=offline,
             ),
