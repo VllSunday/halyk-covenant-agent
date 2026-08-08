@@ -12,6 +12,26 @@
       "title": "AdjustmentAction",
       "type": "string"
     },
+    "CandidateSource": {
+      "description": "Место, которое модель сочла похожим, но недостаточным.\n\nЦитаты здесь нет и быть не может: если бы фрагмент с величиной нашёлся, это был\nбы факт, а не отказ. Адрес всё равно проверяется по переписи — выдуманное имя\nфайла в отказе стоит ровно столько же, сколько в утверждении.",
+      "properties": {
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file_name",
+        "page"
+      ],
+      "title": "CandidateSource",
+      "type": "object"
+    },
     "Currency": {
       "enum": [
         "USD",
@@ -390,10 +410,53 @@
       ],
       "title": "Unit",
       "type": "string"
+    },
+    "UnresolvedReason": {
+      "description": "Почему величины в ответе нет.\n\nПричины различаются не для отчётности: `not_found` означает, что документа с\nтакой величиной в наборе нет, и это вопрос к переписи, а `conflicting_sources` —\nчто документов два и они спорят, и это вопрос к разбору. Одно чинится чтением\nновых страниц, другое — правилом разрешения спора.",
+      "enum": [
+        "not_found",
+        "insufficient_evidence",
+        "conflicting_sources",
+        "unsupported_derivation"
+      ],
+      "title": "UnresolvedReason",
+      "type": "string"
+    },
+    "UnresolvedRequirement": {
+      "description": "Требование, на которое модель отвечает отказом.\n\nОтказ — такой же ответ, как число, и потому обязателен. Молчание вместо него\nнеотличимо от оборванного ответа и забытого элемента батча, а стоят они разного:\nчестный отказ оставляет требование открытым, обрыв требует переспросить.",
+      "properties": {
+        "candidate_source_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CandidateSource"
+          },
+          "title": "Candidate Source Refs",
+          "type": "array"
+        },
+        "explanation": {
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/UnresolvedReason"
+        },
+        "requirement_id": {
+          "title": "Requirement Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "reason",
+        "explanation"
+      ],
+      "title": "UnresolvedRequirement",
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Ответ модели на одного заёмщика.\n\nВсе три списка пустые — законный ответ: он означает, что в документах заёмщика\nничего под открытые требования не нашлось, и это честнее выдуманного числа.",
+  "description": "Ответ модели на одного заёмщика.\n\nОтвет, в котором нет ни одной величины, законен: он означает отказ по каждому\nтребованию, и это честнее правдоподобного числа. Но он обязан быть высказан —\nкаждое требование батча называется ровно в одном исходе.",
   "properties": {
     "adjustments": {
       "default": [],
@@ -417,6 +480,14 @@
         "$ref": "#/$defs/ResolvedFact"
       },
       "title": "Facts",
+      "type": "array"
+    },
+    "unresolved_requirements": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/UnresolvedRequirement"
+      },
+      "title": "Unresolved Requirements",
       "type": "array"
     }
   },

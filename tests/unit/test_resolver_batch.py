@@ -26,6 +26,7 @@ from halyk.models.document import DocumentFacts, DocumentKind, DocumentStatus, P
 from halyk.money import Currency
 from halyk.resolution.batch import RequirementResolver, ResolverBatch
 from halyk.resolution.contract import (
+    CandidateSource,
     Derivation,
     DerivationTerm,
     Evidence,
@@ -33,6 +34,8 @@ from halyk.resolution.contract import (
     ResolvedFact,
     ResolverResponse,
     Sign,
+    UnresolvedReason,
+    UnresolvedRequirement,
 )
 from halyk.resolution.validator import validate
 
@@ -154,13 +157,31 @@ def proposed(**overrides: object) -> ProposedAdjustment:
     return ProposedAdjustment(**(base | overrides))
 
 
+def refused(
+    requirement_id: str = "req-1",
+    *,
+    reason: UnresolvedReason = UnresolvedReason.NOT_FOUND,
+    candidates: tuple[CandidateSource, ...] = (),
+) -> UnresolvedRequirement:
+    return UnresolvedRequirement(
+        requirement_id=requirement_id,
+        reason=reason,
+        explanation="в примечаниях этой величины нет",
+        candidate_source_refs=candidates,
+    )
+
+
 def answer(
     facts: tuple[ResolvedFact, ...] = (),
     derivations: tuple[Derivation, ...] = (),
     adjustments: tuple[ProposedAdjustment, ...] = (),
+    unresolved: tuple[UnresolvedRequirement, ...] = (),
 ) -> dict[str, Any]:
     return ResolverResponse(
-        facts=facts, derivations=derivations, adjustments=adjustments
+        facts=facts,
+        derivations=derivations,
+        adjustments=adjustments,
+        unresolved_requirements=unresolved,
     ).model_dump(mode="json")
 
 
@@ -228,7 +249,7 @@ def test_adjustment_gets_its_status_from_the_code(tmp_path: Path) -> None:
 def test_adjustment_from_a_draft_is_recorded_but_unconfirmed(tmp_path: Path) -> None:
     """Ведомость реестр не меняет, но «не подтверждено» и «не найдено» — разное."""
     draft = document(kind=DocumentKind.AUDIT_PROCEDURES, status=DocumentStatus.DRAFT)
-    responder = Responder(answer(adjustments=(proposed(),)))
+    responder = Responder(answer(adjustments=(proposed(),), unresolved=(refused(),)))
     result = resolver(tmp_path, responder).resolve(batch(documents=(draft,)))
 
     assert result.adjustments[0].status is AdjustmentStatus.UNCONFIRMED
@@ -256,23 +277,111 @@ def test_empty_batch_costs_nothing(tmp_path: Path) -> None:
 # --- частичный ответ ----------------------------------------------------------
 
 
-def test_unanswered_requirement_stays_open(tmp_path: Path) -> None:
-    """Ненайденная величина не ошибка ответа: она честно доедет до отчёта."""
-    responder = Responder(answer(facts=(found("req-1"),)))
+def test_explicit_refusal_leaves_the_requirement_open(tmp_path: Path) -> None:
+    """Названный отказ — законный исход: переспрашивать здесь нечего."""
+    responder = Responder(answer(facts=(found("req-1"),), unresolved=(refused("req-2"),)))
     result = resolver(tmp_path, responder).resolve(
         batch(need("req-1"), need("req-2", kind="collateral_coverage"))
     )
 
     assert result.answered == ("req-1",)
-    assert result.unresolved == ("req-2",)
+    assert [item.requirement_id for item in result.unresolved] == ["req-2"]
+    assert result.unresolved[0].reason is UnresolvedReason.NOT_FOUND
     assert responder.sent == 1
 
 
-def test_empty_answer_is_accepted(tmp_path: Path) -> None:
-    responder = Responder(answer())
+def test_silently_skipped_requirement_costs_a_semantic_retry(tmp_path: Path) -> None:
+    """Забытый элемент батча и честный отказ выглядят одинаково, а стоят разного."""
+    engine = resolver(
+        tmp_path,
+        Responder(
+            answer(facts=(found("req-1"),)),
+            answer(facts=(found("req-1"),), unresolved=(refused("req-2"),)),
+        ),
+    )
+    result = engine.resolve(batch(need("req-1"), need("req-2", kind="collateral_coverage")))
+
+    assert result.answered == ("req-1",)
+    assert [item.requirement_id for item in result.unresolved] == ["req-2"]
+    assert [call.attempt for call in engine.runner.calls] == [1, 2]
+    assert "requirement_is_missing" in engine.runner.calls[0].note
+
+
+def test_second_incomplete_answer_gives_up(tmp_path: Path) -> None:
+    responder = Responder(answer(facts=(found("req-1"),)))
+    with pytest.raises(InvalidResponseError):
+        resolver(tmp_path, responder).resolve(
+            batch(need("req-1"), need("req-2", kind="collateral_coverage"))
+        )
+    assert responder.sent == 2
+
+
+def test_requirement_cannot_be_found_and_refused_at_once(tmp_path: Path) -> None:
+    """Два исхода на одно требование означают, что модель себе противоречит."""
+    engine = resolver(tmp_path, Responder(answer(facts=(found(),), unresolved=(refused(),))))
+    with pytest.raises(InvalidResponseError):
+        engine.resolve(batch())
+    assert "requirement_has_two_outcomes" in engine.runner.calls[0].note
+
+
+def test_repeated_refusal_is_rejected(tmp_path: Path) -> None:
+    engine = resolver(tmp_path, Responder(answer(unresolved=(refused(), refused()))))
+    with pytest.raises(InvalidResponseError):
+        engine.resolve(batch())
+    assert "unresolved_is_duplicated" in engine.runner.calls[0].note
+
+
+def test_refusal_for_an_unknown_requirement_is_rejected(tmp_path: Path) -> None:
+    engine = resolver(tmp_path, Responder(answer(unresolved=(refused("req-99"),))))
+    with pytest.raises(InvalidResponseError):
+        engine.resolve(batch())
+    assert "requirement_is_unknown" in engine.runner.calls[0].note
+
+
+def test_invented_candidate_page_is_rejected(tmp_path: Path) -> None:
+    """Цитаты с отказа не спрашиваем, но адрес обязан быть из нашего набора."""
+    ghost = CandidateSource(file_name="ghost.pdf", page=1)
+    engine = resolver(tmp_path, Responder(answer(unresolved=(refused(candidates=(ghost,)),))))
+
+    with pytest.raises(InvalidResponseError):
+        engine.resolve(batch())
+    assert "source_is_unknown" in engine.runner.calls[0].note
+
+
+def test_refusal_may_point_at_the_page_it_looked_at(tmp_path: Path) -> None:
+    looked = CandidateSource(file_name="notes.pdf", page=2)
+    responder = Responder(
+        answer(
+            unresolved=(
+                refused(reason=UnresolvedReason.INSUFFICIENT_EVIDENCE, candidates=(looked,)),
+            )
+        )
+    )
     result = resolver(tmp_path, responder).resolve(batch())
 
-    assert result.unresolved == ("req-1",)
+    assert result.unresolved[0].candidate_source_refs[0].page == 2
+    assert responder.sent == 1
+
+
+def test_every_requirement_gets_its_own_outcome(tmp_path: Path) -> None:
+    """Полное покрытие: величина, вывод и отказ на три требования разом."""
+    responder = Responder(
+        answer(
+            facts=(found("req-1"),),
+            derivations=(derived(),),
+            unresolved=(refused("req-3"),),
+        )
+    )
+    result = resolver(tmp_path, responder).resolve(
+        batch(
+            need("req-1"),
+            need("req-2", kind="capital_expenditure"),
+            need("req-3", kind="collateral_coverage"),
+        )
+    )
+
+    assert result.answered == ("req-1", "req-2")
+    assert result.still_open == ("req-3",)
     assert responder.sent == 1
 
 
@@ -286,7 +395,8 @@ def test_two_answers_to_one_requirement_resolve_nothing(tmp_path: Path) -> None:
 
     assert result.ambiguous == ("req-1",)
     assert result.facts == ()
-    assert result.unresolved == ("req-1",)
+    assert result.unresolved == ()
+    assert result.still_open == ("req-1",)
 
 
 def test_ambiguity_counts_derivations_too(tmp_path: Path) -> None:
@@ -374,7 +484,10 @@ def test_derivation_that_does_not_add_up_is_rejected(tmp_path: Path) -> None:
 
 
 def test_adjustment_without_its_required_field_is_rejected(tmp_path: Path) -> None:
-    engine = resolver(tmp_path, Responder(answer(adjustments=(proposed(new_value=None),))))
+    engine = resolver(
+        tmp_path,
+        Responder(answer(adjustments=(proposed(new_value=None),), unresolved=(refused(),))),
+    )
     with pytest.raises(InvalidResponseError):
         engine.resolve(batch())
     assert "adjustment_is_incomplete" in engine.runner.calls[0].note
@@ -399,7 +512,9 @@ def test_value_from_a_draft_is_rejected_but_its_adjustment_is_not(tmp_path: Path
         ResolverResponse(facts=(found(),)), requirements=requirements, documents=documents
     )
     change = validate(
-        ResolverResponse(adjustments=(proposed(),)), requirements=requirements, documents=documents
+        ResolverResponse(adjustments=(proposed(),), unresolved_requirements=(refused(),)),
+        requirements=requirements,
+        documents=documents,
     )
     assert [error.code for error in value] == ["source_is_not_authoritative"]
     assert change == []
@@ -472,7 +587,12 @@ def test_request_is_marked_as_the_resolver(tmp_path: Path) -> None:
 
 def test_schema_is_strict() -> None:
     schema = strict_schema(ResolverResponse)
-    assert set(schema["required"]) == {"facts", "derivations", "adjustments"}
+    assert set(schema["required"]) == {
+        "facts",
+        "derivations",
+        "adjustments",
+        "unresolved_requirements",
+    }
     assert schema["additionalProperties"] is False
     assert "'default'" not in repr(schema)
 

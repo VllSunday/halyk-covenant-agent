@@ -15,7 +15,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from halyk.compiler.contract import FactRequirement
@@ -27,11 +28,13 @@ from halyk.models.document import DocumentFacts
 from halyk.models.source import SourceAuthority
 from halyk.money import Currency
 from halyk.resolution.contract import (
+    CandidateSource,
     Derivation,
     Evidence,
     ProposedAdjustment,
     ResolvedFact,
     ResolverResponse,
+    UnresolvedRequirement,
 )
 
 
@@ -112,18 +115,27 @@ def check_authority(
     return []
 
 
+def check_known(
+    requirement: FactRequirement | None, requirement_id: str, path: str
+) -> list[ResolutionError]:
+    """Ответ ссылается на требование, которое мы задавали."""
+    if requirement is not None:
+        return []
+    return [
+        ResolutionError(
+            code="requirement_is_unknown",
+            path=path,
+            detail=f"{requirement_id} нет среди открытых требований батча",
+        )
+    ]
+
+
 def check_requirement(
     requirement: FactRequirement | None, fact_kind: str, requirement_id: str, path: str
 ) -> list[ResolutionError]:
     """Ответ ссылается на открытое требование этого заёмщика и не подменяет его вид."""
     if requirement is None:
-        return [
-            ResolutionError(
-                code="requirement_is_unknown",
-                path=path,
-                detail=f"{requirement_id} нет среди открытых требований батча",
-            )
-        ]
+        return check_known(requirement, requirement_id, path)
     if requirement.fact_kind != fact_kind:
         return [
             ResolutionError(
@@ -238,10 +250,101 @@ def validate_adjustment(
     )
 
 
+def check_candidate(
+    candidate: CandidateSource, documents: Mapping[str, DocumentFacts], path: str
+) -> list[ResolutionError]:
+    """Страница, названная в отказе, существует.
+
+    Цитаты с отказа не спрашиваем — её неоткуда взять. Но адрес проверяем тем же
+    правилом, что и у утверждения: выдуманное имя файла в отказе означает ровно то
+    же, что и в факте, — модель говорит не о нашем наборе.
+    """
+    document = documents.get(candidate.file_name)
+    if document is None:
+        return [
+            ResolutionError(
+                code="source_is_unknown",
+                path=path,
+                detail=f"файла {candidate.file_name} нет среди документов заёмщика",
+            )
+        ]
+    if not any(page.number == candidate.page for page in document.pages):
+        return [
+            ResolutionError(
+                code="page_is_missing",
+                path=path,
+                detail=f"в {candidate.file_name} нет страницы {candidate.page}",
+            )
+        ]
+    return []
+
+
+def validate_unresolved(
+    item: UnresolvedRequirement,
+    requirements: Mapping[str, FactRequirement],
+    documents: Mapping[str, DocumentFacts],
+    path: str,
+) -> list[ResolutionError]:
+    found = check_known(requirements.get(item.requirement_id), item.requirement_id, path)
+    for position, candidate in enumerate(item.candidate_source_refs):
+        found += check_candidate(candidate, documents, f"{path}.candidate_source_refs[{position}]")
+    return found
+
+
+def check_coverage(
+    response: ResolverResponse, requirements: Sequence[FactRequirement]
+) -> list[ResolutionError]:
+    """Каждое требование батча названо ровно в одном исходе.
+
+    Молчание про требование — не отказ. Забытый элемент батча, оборванный ответ,
+    непонятая формулировка и честное «в документах этого нет» выглядят одинаково, а
+    лечатся разным: первые три — повтором запроса, последнее — ничем. Поэтому
+    пропуск отклоняет ответ целиком и стоит одного смыслового повтора, а названный
+    отказ принимается и оставляет требование открытым.
+
+    Несколько величин на одно требование пропуском не считаются: это неоднозначность,
+    и разрешает её код, а не переспрашивание.
+    """
+    answered = Counter(
+        [fact.requirement_id for fact in response.facts]
+        + [item.requirement_id for item in response.derivations]
+    )
+    refused = Counter(item.requirement_id for item in response.unresolved_requirements)
+
+    found: list[ResolutionError] = []
+    for requirement in requirements:
+        name = requirement.requirement_id
+        if not answered[name] and not refused[name]:
+            found.append(
+                ResolutionError(
+                    code="requirement_is_missing",
+                    path="unresolved_requirements",
+                    detail=f"{name} не назван ни величиной, ни отказом",
+                )
+            )
+        elif answered[name] and refused[name]:
+            found.append(
+                ResolutionError(
+                    code="requirement_has_two_outcomes",
+                    path="unresolved_requirements",
+                    detail=f"{name} объявлен и найденным, и ненайденным",
+                )
+            )
+        elif refused[name] > 1:
+            found.append(
+                ResolutionError(
+                    code="unresolved_is_duplicated",
+                    path="unresolved_requirements",
+                    detail=f"{name} объявлен ненайденным {refused[name]} раза",
+                )
+            )
+    return found
+
+
 def validate(
     response: ResolverResponse,
     *,
-    requirements: Iterable[FactRequirement],
+    requirements: Sequence[FactRequirement],
     documents: Mapping[str, DocumentFacts],
 ) -> list[ResolutionError]:
     """Все проверки ответа. Неоднозначности здесь нет — она не ошибка ответа."""
@@ -251,6 +354,8 @@ def validate(
         found += validate_fact(fact, known, documents, f"facts[{position}]")
     for position, derivation in enumerate(response.derivations):
         found += validate_derivation(derivation, known, documents, f"derivations[{position}]")
+    for position, item in enumerate(response.unresolved_requirements):
+        found += validate_unresolved(item, known, documents, f"unresolved_requirements[{position}]")
     for position, adjustment in enumerate(response.adjustments):
         found += validate_adjustment(adjustment, documents, f"adjustments[{position}]")
-    return found
+    return [*found, *check_coverage(response, requirements)]

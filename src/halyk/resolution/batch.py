@@ -53,6 +53,7 @@ from halyk.resolution.contract import (
     ProposedAdjustment,
     ResolvedFact,
     ResolverResponse,
+    UnresolvedRequirement,
 )
 from halyk.resolution.validator import ResolutionError, validate
 
@@ -133,20 +134,31 @@ def _requirement(item: FactRequirement) -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class ResolutionResult:
-    """Что удалось дочитать, что оказалось спорным и что так и осталось открытым."""
+    """Что удалось дочитать, что оказалось спорным и что так и осталось открытым.
+
+    Отказ модели и спор источников лежат врозь: первый она высказала сама и с
+    причиной, второй вывел код из того, что подходящих величин пришло несколько.
+    Слитые в один список, они выглядели бы одинаково, а чинятся по-разному.
+    """
 
     account_id: str
     facts: tuple[ResolvedFact, ...] = ()
     derivations: tuple[Derivation, ...] = ()
     adjustments: tuple[Adjustment, ...] = ()
     ambiguous: tuple[str, ...] = ()
-    unresolved: tuple[str, ...] = ()
+    unresolved: tuple[UnresolvedRequirement, ...] = ()
 
     @property
     def answered(self) -> tuple[str, ...]:
         found = {fact.requirement_id for fact in self.facts}
         found |= {derivation.requirement_id for derivation in self.derivations}
         return tuple(sorted(found))
+
+    @property
+    def still_open(self) -> tuple[str, ...]:
+        """Требования, которые расчёт не получит: и отказанные, и спорные."""
+        refused = {item.requirement_id for item in self.unresolved}
+        return tuple(sorted(refused | set(self.ambiguous)))
 
 
 def _source(evidence_file: str, page: int, documents: dict[str, DocumentFacts]) -> SourceRef:
@@ -320,9 +332,9 @@ class RequirementResolver:
         if errors:
             raise ResolutionRejectedError(errors)
 
+        # Покрытие входа проверено валидатором, поэтому здесь остаётся только развести
+        # исходы: отказ пришёл от модели, спор вывел код.
         ambiguous = _ambiguous(response, batch.requirements)
-        answered = {fact.requirement_id for fact in response.facts}
-        answered |= {item.requirement_id for item in response.derivations}
         return ResolutionResult(
             account_id=batch.account_id,
             facts=tuple(item for item in response.facts if item.requirement_id not in ambiguous),
@@ -332,11 +344,7 @@ class RequirementResolver:
             adjustments=tuple(adjustments),
             ambiguous=tuple(sorted(ambiguous)),
             unresolved=tuple(
-                sorted(
-                    item.requirement_id
-                    for item in batch.requirements
-                    if item.requirement_id not in answered or item.requirement_id in ambiguous
-                )
+                sorted(response.unresolved_requirements, key=lambda item: item.requirement_id)
             ),
         )
 
