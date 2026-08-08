@@ -50,6 +50,9 @@ _CONTRACT_WORDS = re.compile(
     re.IGNORECASE,
 )
 _TABLE_ROW = re.compile(r"^\|.*\|.*\|", re.M)
+# Одна строка с вертикальными чертами таблицей не является — ею может оказаться
+# рамка или разделитель. Признаком считаем две и больше.
+_TABLE_ROWS = 2
 _SIGNIFICANT_SIGNALS = 2
 
 
@@ -91,7 +94,7 @@ def relevance_signals(text: str) -> tuple[str, ...]:
         found.append("account")
     if _CONTRACT_WORDS.search(text):
         found.append("contract_vocabulary")
-    if len(_TABLE_ROW.findall(text)) >= 2:
+    if len(_TABLE_ROW.findall(text)) >= _TABLE_ROWS:
         found.append("table")
     return tuple(found)
 
