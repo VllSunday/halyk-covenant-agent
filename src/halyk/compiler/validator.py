@@ -19,7 +19,7 @@ from halyk.compiler.dimensions import check as check_dimensions
 from halyk.models.classification import TransactionCategory
 from halyk.models.covenant import Unit
 from halyk.models.document import DocumentFacts, DocumentStatus
-from halyk.models.fact import Fact
+from halyk.models.fact import Fact, Scope
 from halyk.models.formula import (
     Condition,
     ExternalMetric,
@@ -33,6 +33,20 @@ from halyk.models.formula import (
 _WHITESPACE = re.compile(r"\s+")
 
 _MONTHS_IN_YEAR = 12
+
+# Денежные статьи, которые уже есть в нормализованном реестре. Компилятор иногда
+# объявляет их внешними фактами из-за слов «аудированная» или «по МСФО». Тогда
+# resolver честно ищет число в PDF и отказывается, хотя исполнитель мог бы сложить
+# классифицированные операции. Проверяем и имя, и описание: имя модели свободное.
+_LEDGER_MEASURE = re.compile(
+    r"(?:revenue|выруч|operating[_\s-]*(?:expense|cost)|opex|"
+    r"операцион\w*[_\s-]*расход|capex|capital[_\s-]*expenditure|капитал\w*[_\s-]*затрат|"
+    r"payroll|staff[_\s-]*cost|оплат\w*[_\s-]*труд|utilities|utility|коммуналь|"
+    r"rent|lease[_\s-]*payment|аренд|tax(?:es)?|налог|interest[_\s-]*expense|процент\w*[_\s-]*расход|"
+    r"insurance[_\s-]*premium|страхов\w*[_\s-]*(?:преми|взнос)|"
+    r"financing[_\s-]*inflow|поступлен\w*[_\s-]*(?:от[_\s-]*)?финансирован)",
+    re.IGNORECASE,
+)
 
 # Узлы, из которых собирается дерево. Список закрыт: ответ с неизвестной операцией
 # не разберётся ещё на уровне схемы, но проверка оставлена явной, чтобы расширение
@@ -290,6 +304,24 @@ def check_requirements(clause: CompiledClause) -> list[CompilationError]:
     return found
 
 
+def check_ledger_measures(clause: CompiledClause) -> list[CompilationError]:
+    """Статья реестра заёмщика не должна уходить на поиск во внешних документах."""
+    return [
+        CompilationError(
+            code="ledger_measure_declared_as_fact",
+            path=f"required_facts[{index}]",
+            detail=(
+                f"{item.fact_kind} агрегируется из реестра заёмщика; "
+                "используй ledger_sum с подходящей категорией"
+            ),
+        )
+        for index, item in enumerate(clause.required_facts)
+        if item.scope is Scope.BORROWER
+        and item.unit is Unit.MONEY
+        and _LEDGER_MEASURE.search(f"{item.fact_kind} {item.description}")
+    ]
+
+
 def candidates(requirement: FactRequirement, facts: Iterable[Fact]) -> list[Fact]:
     """Факты, удовлетворяющие требованию целиком.
 
@@ -370,6 +402,7 @@ def validate(
         *check_selectors(clause),
         *check_units(clause),
         *check_requirements(clause),
+        *check_ledger_measures(clause),
         *[
             CompilationError(code="dimension_mismatch", path=error.path, detail=error.detail)
             for error in check_dimensions(clause)

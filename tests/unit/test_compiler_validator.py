@@ -21,6 +21,7 @@ from halyk.compiler.contract import (
 from halyk.compiler.validator import (
     ALLOWED_OPS,
     check_coverage,
+    check_ledger_measures,
     check_requirements,
     resolve_requirements,
     validate,
@@ -277,6 +278,38 @@ def test_declared_fact_passes() -> None:
         required_facts=(need("one_off_item"),),
     )
     assert check_requirements(item) == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "description"),
+    [
+        ("borrower_revenue_ifrs", "audited revenue of the Borrower"),
+        ("borrower_operating_expenses_ifrs", "Операционные расходы заёмщика"),
+        ("borrower_audited_covenant_revenue", "revenue for covenant purposes"),
+    ],
+)
+def test_borrower_ledger_measure_cannot_be_external_fact(kind: str, description: str) -> None:
+    item = clause(required_facts=(need(kind, description=description),))
+    errors = check_ledger_measures(item)
+    assert codes(errors) == {"ledger_measure_declared_as_fact"}
+
+
+def test_group_capex_remains_a_document_fact() -> None:
+    item = clause(
+        required_facts=(
+            need(
+                "group_capex",
+                description="capital expenditure of the consolidated Group",
+                scope=Scope.GROUP,
+            ),
+        )
+    )
+    assert check_ledger_measures(item) == []
+
+
+def test_document_only_borrower_fact_remains_allowed() -> None:
+    item = clause(required_facts=(need("one_off_policy", description="materiality threshold"),))
+    assert check_ledger_measures(item) == []
 
 
 # --- разрешение требований ----------------------------------------------------
