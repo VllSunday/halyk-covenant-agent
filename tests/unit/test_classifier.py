@@ -134,7 +134,7 @@ def test_disagreement_goes_to_the_verifier(tmp_path: Path) -> None:
     assert record.decision_source is DecisionSource.VERIFIER
     assert record.final_category is C.CAPEX
     assert record.rule_category is C.OPEX
-    assert classifier.verifier_calls == ["TXN-P1-0003"]
+    assert classifier.disputed_rows == ["TXN-P1-0003"]
 
 
 def test_low_confidence_is_checked_before_it_becomes_unknown(tmp_path: Path) -> None:
@@ -246,7 +246,7 @@ def test_verifier_asks_once_per_borrower(tmp_path: Path) -> None:
 
     assert len(verifier.calls) == 1
     assert verifier.calls[0].size == 3
-    assert len(classifier.verifier_calls) == 3
+    assert len(classifier.disputed_rows) == 3
     assert all(r.decision_source is DecisionSource.VERIFIER for r in result.records)
 
 

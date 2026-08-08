@@ -144,7 +144,11 @@ class TransactionClassifier:
     model: CategoryClassifier
     verifier: CategoryClassifier | None = None
     floor: float = CONFIDENCE_FLOOR
-    verifier_calls: list[str] = field(default_factory=list)
+    # Спорные строки, а не запросы: на каждого заёмщика уходит один вызов verifier
+    # независимо от того, сколько строк в нём разбирается. Прежнее имя verifier_calls
+    # читалось как счётчик обращений к модели и заставляло искать регресс там, где
+    # его нет.
+    disputed_rows: list[str] = field(default_factory=list)
 
     def _batches(
         self, ledger: NormalisedLedger, accounts: Sequence[str]
@@ -271,7 +275,7 @@ class TransactionClassifier:
             # Спорное собирается по всему заёмщику и уходит одним запросом. По
             # строке за раз это те же ответы, но вдесятеро дольше — измерено.
             doubtful = [t for t in transactions if self.needs_check(t, verdicts.get(t.txn_id))]
-            self.verifier_calls.extend(t.txn_id for t in doubtful)
+            self.disputed_rows.extend(t.txn_id for t in doubtful)
             checked: dict[str, CategoryVerdict] = {}
             if doubtful and self.verifier is not None:
                 checked = self.verifier.classify(account_id, [_model_input(t) for t in doubtful])
@@ -289,6 +293,6 @@ class TransactionClassifier:
         usage = {
             "model": self.model.usage(),
             "verifier": self.verifier.usage() if self.verifier else None,
-            "verifier_transactions": len(self.verifier_calls),
+            "verifier_disputed_rows": len(self.disputed_rows),
         }
         return ClassificationResult(records=tuple(records), usage=usage)

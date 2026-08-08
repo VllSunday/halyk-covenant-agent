@@ -527,9 +527,15 @@ def classify(
     usage = result.usage["model"]
     console.print(
         f"Батчей {usage['batches']}, живых {usage['live_calls']}, из кэша {usage['cache_hits']}, "
-        f"токенов {usage['total_tokens']}, {usage['seconds_total']:.1f} c; "
-        f"проверок verifier {result.usage['verifier_transactions']}"
+        f"токенов {usage['total_tokens']}, {usage['seconds_total']:.1f} c"
     )
+    verifier = result.usage["verifier"]
+    disputed = result.usage["verifier_disputed_rows"]
+    if verifier:
+        console.print(
+            f"Verifier: спорных строк {disputed} в {verifier['batches']} батчах, "
+            f"живых {verifier['live_calls']}, из кэша {verifier['cache_hits']}"
+        )
     console.print(f"Артефакты: {out_dir}")
 
     for record in result.unresolved:
