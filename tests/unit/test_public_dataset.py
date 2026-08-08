@@ -178,6 +178,28 @@ def test_superseded_editions_are_separated(inventory: DatasetInventory) -> None:
     assert by_status[DocumentStatus.SUPERSEDED] == 12
 
 
+def test_current_edition_is_chosen_by_document_markers(inventory: DatasetInventory) -> None:
+    """У P5 две редакции с разными порогами, и выбирать между ними надо по тексту.
+
+    Порог 9.00x стоит в действующей редакции, 9.75x — в заменённой. Ошибка выбора
+    даёт верное число при неверном вердикте, то есть теряет ячейку целиком. Эталон
+    здесь намеренно не открывается: признак должен быть документальным, иначе на
+    приватном наборе его нечем будет применить.
+    """
+    editions = [
+        doc
+        for doc in inventory.relevant
+        if doc.kind is DocumentKind.LOAN_AGREEMENT and doc.account_id == "ACC-7805"
+    ]
+    assert len(editions) == 2
+
+    by_status = {doc.status: "".join(page.text for page in doc.pages) for doc in editions}
+    assert "9.00x" in by_status[DocumentStatus.CURRENT]
+    assert "9.75x" in by_status[DocumentStatus.SUPERSEDED]
+    assert "НЕДЕЙСТВУЮЩАЯ РЕДАКЦИЯ" in by_status[DocumentStatus.SUPERSEDED]
+    assert "НЕДЕЙСТВУЮЩАЯ РЕДАКЦИЯ" not in by_status[DocumentStatus.CURRENT]
+
+
 def test_only_one_audit_report_is_final(inventory: DatasetInventory) -> None:
     reports = [doc for doc in inventory.relevant if doc.kind is DocumentKind.AUDIT_PROCEDURES]
     assert len(reports) == 6
