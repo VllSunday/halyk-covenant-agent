@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -70,8 +71,15 @@ class CollateralPolicy:
 
 
 def normalise_counterparty(name: str) -> str:
-    """Форма названия для сопоставления досье с реестром."""
-    return _SPACES.sub(" ", _PUNCTUATION.sub("", name)).strip().casefold()
+    """Форма названия для сопоставления досье с реестром.
+
+    NFKC идёт первым: неразрывный пробел и полноширинные знаки приходят из PDF
+    неотличимо от обычных, и без приведения `Aktau Holdings` не совпало бы с
+    `Aktau Holdings`. Юридическая форма при этом сохраняется — она отбрасывается
+    только как пунктуация, поэтому `LLP` и `JSC` продолжают различать компании.
+    """
+    folded = unicodedata.normalize("NFKC", name)
+    return _SPACES.sub(" ", _PUNCTUATION.sub("", folded)).strip().casefold()
 
 
 def _share(raw: str) -> Decimal:
