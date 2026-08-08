@@ -434,3 +434,30 @@ def test_actions_used_on_the_public_dataset(ledger: NormalisedLedger) -> None:
         AdjustmentAction.SET_EFFECTIVE_DATE: 1,
         AdjustmentAction.CONVERT_CURRENCY: 1,
     }
+
+
+def test_group_capex_of_p5_comes_from_the_english_report(facts: FactSet) -> None:
+    """Капзатраты Группы выводятся из движения основных средств, а не лежат строкой.
+
+    Документ англоязычный и номера счёта не содержит: с заёмщиком его связывает только
+    упоминание названия в примечании о сегментах. Пока разбор шёл по русским маркерам
+    и по `ACC-NNNN`, отчёт молча уходил в шум вместе с этой величиной.
+    """
+    ppe = [f for f in facts.by_account("ACC-7805") if f.kind is FactKind.PPE_ROLL_FORWARD]
+    assert len(ppe) == 1
+    assert ppe[0].additions == Decimal("21847362.55")
+    assert {ref.page for ref in ppe[0].supporting} >= {3, 4}
+
+
+def test_p5_capital_intensity_matches_the_key(ledger: NormalisedLedger, facts: FactSet) -> None:
+    """P5/6.1 целиком: отношение капзатрат Группы к EBITDA заёмщика.
+
+    Ключ здесь только сверяется в конце — само число получено из документов.
+    """
+    capex = Decimal("21847362.55")
+    ebitda = Decimal("8214663.28") - Decimal("5902447.13")
+    assert (capex / ebitda).quantize(Decimal("0.01")) == Decimal("9.45")
+
+    key = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
+    cell = key["scenarios"]["P5"]["covenants"]["6.1"]
+    assert (Decimal(str(cell["actual"])), cell["status"]) == (Decimal("9.45"), "BREACH")

@@ -14,7 +14,7 @@ from halyk.knowledge.related_party import build_index
 from halyk.models.adjustment import NormalisedTransaction
 from halyk.models.classification import TransactionCategory as Cat
 from halyk.models.covenant import Operator, RoundingSpec, Unit
-from halyk.models.fact import OneOffItemFact, OneOffPolicyFact
+from halyk.models.fact import OneOffItemFact, OneOffPolicyFact, PpeRollForwardFact
 from halyk.models.formula import (
     Condition,
     Constant,
@@ -440,3 +440,60 @@ def test_ratio_is_stable_under_permutation() -> None:
     first = executor(*rows).run(spec)
     second = executor(*reversed(rows)).run(spec)
     assert first.actual == second.actual
+
+
+def test_external_metric_is_flagged_as_our_omission() -> None:
+    """Организаторы подтвердили: внешних источников не нужно. Значит это наш промах."""
+    result = executor(txn("T1", "-1000", Cat.CAPEX)).run(
+        formula(
+            measure=Ratio(
+                numerator=spend(Cat.CAPEX),
+                denominator=ExternalMetric(name="group_capex", description="не раскрыта"),
+            ),
+            unit=Unit.RATIO,
+        )
+    )
+    assert result.failure is not None
+    assert result.failure.means_we_missed_a_document
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [Failure.MISSING_FACT, Failure.MISSING_KYC_POLICY, Failure.ZERO_DENOMINATOR],
+)
+def test_other_failures_are_not_treated_as_missed_documents(reason: Failure) -> None:
+    assert not reason.means_we_missed_a_document
+
+
+def test_ppe_roll_forward_feeds_the_formula() -> None:
+    """Капзатраты входят выведенной величиной: строки с ними в отчётности нет."""
+    facts = (
+        PpeRollForwardFact(
+            account_id=ACCOUNT,
+            source=SOURCE,
+            opening=Money.from_decimal(Decimal("148028989.69"), Currency.USD),
+            closing=Money.from_decimal(Decimal("154050122.81"), Currency.USD),
+            depreciation=Money.from_decimal(Decimal("15826229.43"), Currency.USD),
+            disposals=Money.from_decimal(Decimal(0), Currency.USD),
+        ),
+    )
+    engine = Executor(
+        account_id=ACCOUNT,
+        transactions=(txn("T1", "8214663.28", Cat.REVENUE), txn("T2", "-5902447.13", Cat.OPEX)),
+        facts=facts,
+    )
+    result = engine.run(
+        formula(
+            measure=Ratio(
+                numerator=FactValue(fact_kind="ppe_roll_forward"),
+                denominator=Difference(
+                    left=LedgerSum(selector=Selector(categories=(Cat.REVENUE,))),
+                    right=spend(Cat.OPEX),
+                ),
+            ),
+            unit=Unit.RATIO,
+            threshold=Constant(value=Decimal("9.00")),
+        )
+    )
+    assert result.actual == Decimal("9.45")
+    assert result.status == "BREACH"

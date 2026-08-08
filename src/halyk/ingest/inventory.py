@@ -18,6 +18,7 @@ from halyk.ingest.guard import dataset_files
 from halyk.ingest.ledger import LedgerError, read_ledger
 from halyk.ingest.scenarios import ScenarioMap
 from halyk.knowledge import router
+from halyk.knowledge.kyc import normalise_counterparty
 from halyk.models.document import DocumentFacts, PageFacts, TextSource
 from halyk.models.transaction import LedgerRow
 from halyk.parsing import pdf
@@ -154,6 +155,40 @@ def read_document(path: Path, ocr: CachedOcr | None = None) -> DocumentFacts:
     )
 
 
+def _link_by_organisation(documents: Sequence[DocumentFacts]) -> list[DocumentFacts]:
+    """Второй проход: привязать документы, в которых нет номера счёта.
+
+    Отчётность материнской компании относится к заёмщику, но его счёта не называет —
+    связь идёт через упоминание названия организации в примечании о сегментах. Пока
+    привязка шла только по `ACC-NNNN`, такой документ уходил в шум молча, а вместе с
+    ним и величина, без которой не считается ковенант.
+
+    Привязка принимается только при единственном совпадении: документ, упомянувший
+    двух заёмщиков сразу, остаётся неразрешённым и попадает в отчёт. Угадывать здесь
+    хуже, чем показать человеку.
+    """
+    known = {
+        normalise_counterparty(name): doc.account_id
+        for doc in documents
+        if doc.account_id and (name := router.detect_organisation(doc.text))
+    }
+    if not known:
+        return list(documents)
+
+    linked = []
+    for document in documents:
+        if document.account_id or not document.kind.is_relevant:
+            linked.append(document)
+            continue
+        accounts = router.mentioned_organisations(document.text, known)
+        linked.append(
+            document.model_copy(update={"account_id": next(iter(accounts))})
+            if len(accounts) == 1
+            else document
+        )
+    return linked
+
+
 def build_inventory(
     root: Path, template_scenarios: Sequence[str], ocr: CachedOcr | None = None
 ) -> DatasetInventory:
@@ -163,6 +198,7 @@ def build_inventory(
 
     documents = [read_document(path, ocr) for path in files if path.suffix.lower() == ".pdf"]
     skipped = tuple(p.name for p in files if p.suffix.lower() != ".pdf")
+    documents = _link_by_organisation(documents)
 
     unresolved = tuple(
         doc.file_name for doc in documents if doc.kind.is_relevant and doc.account_id is None

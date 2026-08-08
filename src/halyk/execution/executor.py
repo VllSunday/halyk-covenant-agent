@@ -26,6 +26,7 @@ from halyk.models.fact import (
     Fact,
     OneOffItemFact,
     OneOffPolicyFact,
+    PpeRollForwardFact,
 )
 from halyk.models.formula import (
     Absolute,
@@ -59,6 +60,20 @@ class Failure(StrEnum):
     MISSING_KYC_POLICY = "missing_kyc_policy"
     AMBIGUOUS_COUNTERPARTY = "ambiguous_counterparty"
     ZERO_DENOMINATOR = "zero_denominator"
+
+    @property
+    def means_we_missed_a_document(self) -> bool:
+        """Отказ, которого на этих данных быть не должно.
+
+        Организаторы подтвердили, что всё нужное лежит в наборе и внешних источников
+        не требуется ни в публичном, ни в приватном. Значит ссылка на невыведенную
+        внешнюю величину — признак непрочитанного документа с нашей стороны, а не
+        свойства данных, и в боевом прогоне обязана валить строгую проверку.
+
+        Ровно так мы и потеряли капитальные затраты Группы: англоязычный отчёт без
+        номера счёта уходил в шум, а ячейка молча оставалась несчитанной.
+        """
+        return self is Failure.MISSING_EXTERNAL_METRIC
 
 
 class Diagnostic(StrEnum):
@@ -300,6 +315,13 @@ class Executor:
         used: set[str] = set()
         for fact in self.facts:
             if fact.kind != node.fact_kind:
+                continue
+            # Движение основных средств входит в формулу выведенной величиной:
+            # отдельной строки капитальных затрат в отчётности нет, она получается
+            # из тождества. Сами движения остаются в факте, чтобы вывод был проверяем.
+            if isinstance(fact, PpeRollForwardFact):
+                total += fact.additions
+                used.add(f"{fact.kind}:additions")
                 continue
             if not isinstance(fact, OneOffItemFact | AggregateObligationFact):
                 continue

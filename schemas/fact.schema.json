@@ -117,6 +117,7 @@
         "financial_notes",
         "kyc_file",
         "treasury_memo",
+        "consolidated_report",
         "unrelated"
       ],
       "title": "DocumentKind",
@@ -252,6 +253,54 @@
         "minimum"
       ],
       "title": "OneOffPolicyFact",
+      "type": "object"
+    },
+    "PpeRollForwardFact": {
+      "description": "Движение основных средств, из которого выводятся капитальные затраты.\n\nОтдельной строки «capital expenditure» в отчётности нет, поэтому хранятся все\nраскрытые движения, а не одно выведенное число: по ним видно, из чего получились\nкапзатраты, и на них же проверяется, что тождество замкнулось.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "closing": {
+          "$ref": "#/$defs/Money"
+        },
+        "depreciation": {
+          "$ref": "#/$defs/Money"
+        },
+        "disposals": {
+          "$ref": "#/$defs/Money"
+        },
+        "kind": {
+          "const": "ppe_roll_forward",
+          "default": "ppe_roll_forward",
+          "title": "Kind",
+          "type": "string"
+        },
+        "opening": {
+          "$ref": "#/$defs/Money"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "supporting": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Supporting",
+          "type": "array"
+        }
+      },
+      "required": [
+        "account_id",
+        "source",
+        "opening",
+        "closing",
+        "depreciation",
+        "disposals"
+      ],
+      "title": "PpeRollForwardFact",
       "type": "object"
     },
     "RelatedPartyPolicyFact": {
@@ -417,6 +466,7 @@
       "fx_settlement": "#/$defs/FxSettlementFact",
       "one_off_item": "#/$defs/OneOffItemFact",
       "one_off_policy": "#/$defs/OneOffPolicyFact",
+      "ppe_roll_forward": "#/$defs/PpeRollForwardFact",
       "related_party_policy": "#/$defs/RelatedPartyPolicyFact"
     },
     "propertyName": "kind"
@@ -439,6 +489,9 @@
     },
     {
       "$ref": "#/$defs/FxSettlementFact"
+    },
+    {
+      "$ref": "#/$defs/PpeRollForwardFact"
     }
   ]
 }

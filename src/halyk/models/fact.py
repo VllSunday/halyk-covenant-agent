@@ -26,6 +26,7 @@ class FactKind(StrEnum):
     ONE_OFF_POLICY = "one_off_policy"
     AGGREGATE_OBLIGATION = "aggregate_obligation"
     FX_SETTLEMENT = "fx_settlement"
+    PPE_ROLL_FORWARD = "ppe_roll_forward"
 
 
 class Share(BaseModel):
@@ -122,13 +123,42 @@ class FxSettlementFact(FactBase):
         return self.settled.to_decimal() / self.invoiced.to_decimal()
 
 
+class PpeRollForwardFact(FactBase):
+    """Движение основных средств, из которого выводятся капитальные затраты.
+
+    Отдельной строки «capital expenditure» в отчётности нет, поэтому хранятся все
+    раскрытые движения, а не одно выведенное число: по ним видно, из чего получились
+    капзатраты, и на них же проверяется, что тождество замкнулось.
+    """
+
+    kind: Literal[FactKind.PPE_ROLL_FORWARD] = FactKind.PPE_ROLL_FORWARD
+    opening: Money
+    closing: Money
+    depreciation: Money
+    disposals: Money
+    # Страница со связью документа с заёмщиком отличается от страницы с числами, а
+    # объяснение ответа должно показывать обе.
+    supporting: tuple[SourceRef, ...] = ()
+
+    @property
+    def additions(self) -> Decimal:
+        """`closing = opening + additions − depreciation − disposals`."""
+        return (
+            self.closing.to_decimal()
+            - self.opening.to_decimal()
+            + self.depreciation.to_decimal()
+            + self.disposals.to_decimal()
+        )
+
+
 Fact = Annotated[
     RelatedPartyPolicyFact
     | CollateralCoverageFact
     | OneOffItemFact
     | OneOffPolicyFact
     | AggregateObligationFact
-    | FxSettlementFact,
+    | FxSettlementFact
+    | PpeRollForwardFact,
     Field(discriminator="kind"),
 ]
 

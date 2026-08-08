@@ -16,6 +16,9 @@ class DocumentKind(StrEnum):
     FINANCIAL_NOTES = "financial_notes"
     KYC_FILE = "kyc_file"
     TREASURY_MEMO = "treasury_memo"
+    # Отчётность материнской компании: относится к заёмщику, но номера его счёта не
+    # содержит и привязывается по названию организации.
+    CONSOLIDATED_REPORT = "consolidated_report"
     UNRELATED = "unrelated"
 
     @property

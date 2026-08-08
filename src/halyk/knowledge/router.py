@@ -10,25 +10,70 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Mapping
 
+from halyk.knowledge.kyc import normalise_counterparty
 from halyk.models.document import DocumentKind, DocumentStatus
 
 ACCOUNT_PATTERN = re.compile(r"ACC-\d{4}")
 REPORT_PATTERN = re.compile(r"\bAR-\d{4}-\d{4}\b")
 _WHITESPACE = re.compile(r"\s+")
 
+# Досье объявляет владельца счёта парой строк «Организация» и «Счёт». Метки идут на
+# обоих языках: в приватном наборе досье может прийти на английском.
+_ORGANISATION = re.compile(
+    r"(?:Организация|Organisation|Organization|Entity)\s*\n\s*(?P<name>\S[^\n]*?)\s*\n"
+    r"\s*(?:Счёт|Счет|Account)\s*\n\s*ACC-\d{4}",
+    re.IGNORECASE,
+)
+
 # Маркеры сравниваются с текстом, из которого убраны все пробелы. В извлечённом
 # слое заголовки идут вразрядку («Д О Г О В О Р») и рвутся посреди слова
 # («КОНФИДЕНЦИА ЛЬНО»), и обычный поиск подстроки на них не работает.
+# Маркеры перечислены на обоих языках. Организаторы предупредили, что документы могут
+# быть на английском, и в открытом наборе такой ровно один — консолидированная
+# отчётность материнской компании. Она относится к заёмщику, но по русским маркерам не
+# опознавалась и молча уходила в шум вместе с величиной, без которой не считается
+# ковенант P5/6.1.
 _KIND_MARKERS: tuple[tuple[DocumentKind, tuple[str, ...]], ...] = (
-    (DocumentKind.LOAN_AGREEMENT, ("ДОГОВОРБАНКОВСКОГОЗАЙМА",)),
+    (
+        DocumentKind.LOAN_AGREEMENT,
+        ("ДОГОВОРБАНКОВСКОГОЗАЙМА", "BANKLOANAGREEMENT", "LOANAGREEMENT"),
+    ),
     (
         DocumentKind.AUDIT_PROCEDURES,
-        ("ОТЧЁТОВЫПОЛНЕНИИСОГЛАСОВАННЫХПРОЦЕДУР", "ВЕДОМОСТЬВОПРОСОВПОКЛАССИФИКАЦИИ"),
+        (
+            "ОТЧЁТОВЫПОЛНЕНИИСОГЛАСОВАННЫХПРОЦЕДУР",
+            "ВЕДОМОСТЬВОПРОСОВПОКЛАССИФИКАЦИИ",
+            "AGREEDUPONPROCEDURES",
+            "CLASSIFICATIONQUERYSCHEDULE",
+        ),
     ),
-    (DocumentKind.FINANCIAL_NOTES, ("ПРИМЕЧАНИЯКФИНАНСОВОЙОТЧЁТНОСТИ",)),
-    (DocumentKind.KYC_FILE, ("ДОСЬЕ«ЗНАЙСВОЕГОКЛИЕНТА»", "ПРОВЕРКАСВЯЗАННЫХСТОРОН")),
-    (DocumentKind.TREASURY_MEMO, ("СЛУЖЕБНАЯЗАПИСКАКАЗНАЧЕЙСТВА",)),
+    (
+        DocumentKind.CONSOLIDATED_REPORT,
+        (
+            "CONSOLIDATEDFINANCIALSTATEMENTS",
+            "CONSOLIDATEDANNUALREPORT",
+            "КОНСОЛИДИРОВАННАЯФИНАНСОВАЯОТЧЁТНОСТЬ",
+        ),
+    ),
+    (
+        DocumentKind.FINANCIAL_NOTES,
+        ("ПРИМЕЧАНИЯКФИНАНСОВОЙОТЧЁТНОСТИ", "NOTESTOTHEFINANCIALSTATEMENTS"),
+    ),
+    (
+        DocumentKind.KYC_FILE,
+        (
+            "ДОСЬЕ«ЗНАЙСВОЕГОКЛИЕНТА»",
+            "ПРОВЕРКАСВЯЗАННЫХСТОРОН",
+            "KNOWYOURCUSTOMER",
+            "RELATEDPARTYREVIEW",
+        ),
+    ),
+    (
+        DocumentKind.TREASURY_MEMO,
+        ("СЛУЖЕБНАЯЗАПИСКАКАЗНАЧЕЙСТВА", "TREASURYMEMORANDUM"),
+    ),
 )
 
 _SUPERSEDED_MARKERS = ("НЕДЕЙСТВУЮЩАЯРЕДАКЦИЯ", "НЕПРИМЕНЯЕТСЯ")
@@ -78,3 +123,27 @@ def detect_account(text: str) -> str | None:
 def detect_report_number(text: str) -> str | None:
     match = REPORT_PATTERN.search(text)
     return str(match.group(0)) if match else None
+
+
+def detect_organisation(text: str) -> str | None:
+    """Название организации, которой принадлежит документ.
+
+    Берётся из пары «Организация — Счёт» в досье: она объявлена явно, в отличие от
+    названий, разбросанных по тексту договора вперемешку с контрагентами.
+    """
+    match = _ORGANISATION.search(text)
+    return match.group("name").strip() if match else None
+
+
+def mentioned_organisations(text: str, known: Mapping[str, str]) -> frozenset[str]:
+    """Счета тех организаций, чьи названия встретились в тексте.
+
+    Нужно для документов, не содержащих номера счёта вовсе. Консолидированная
+    отчётность материнской компании — как раз такой случай: с заёмщиком её связывает
+    только упоминание его названия в примечании о сегментах.
+
+    Сопоставление идёт по нормализованной форме, той же, что у связанных сторон:
+    юридическая форма пишется по-разному в разных документах.
+    """
+    haystack = normalise_counterparty(text)
+    return frozenset(account for name, account in known.items() if name and name in haystack)

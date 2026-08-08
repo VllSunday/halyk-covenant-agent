@@ -403,6 +403,7 @@
         "financial_notes",
         "kyc_file",
         "treasury_memo",
+        "consolidated_report",
         "unrelated"
       ],
       "title": "DocumentKind",

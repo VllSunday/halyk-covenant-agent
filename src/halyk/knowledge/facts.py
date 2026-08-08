@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -14,6 +15,7 @@ from halyk.ingest.inventory import DatasetInventory
 from halyk.knowledge import notes
 from halyk.knowledge.authority import resolve_authority, superseded_drafts
 from halyk.knowledge.kyc import KycError, parse_collateral_policy, parse_related_party_policy
+from halyk.knowledge.ppe import PpeError, parse_ppe_movement
 from halyk.models.adjustment import (
     Adjustment,
     AdjustmentStatus,
@@ -33,10 +35,16 @@ from halyk.models.fact import (
     FxSettlementFact,
     OneOffItemFact,
     OneOffPolicyFact,
+    PpeRollForwardFact,
     RelatedPartyPolicyFact,
     Share,
 )
 from halyk.models.source import SourceAuthority, SourceRef
+from halyk.money import Currency, Money
+
+_PPE_MARKERS = re.compile(
+    r"Property,?\s+Plant\s+and\s+Equipment|Основные\s+средства|Ekibastuz|Net book value", re.I
+)
 
 _DISCLOSURE_KINDS = (
     DocumentKind.FINANCIAL_NOTES,
@@ -262,6 +270,35 @@ def _fx_adjustments(facts: Sequence[Fact]) -> list[Adjustment]:
     ]
 
 
+def _ppe_facts(document: DocumentFacts, authority: SourceAuthority) -> list[Fact]:
+    """Движение основных средств из консолидированной отчётности.
+
+    Раздел разбирается по документу целиком, а не постранично: связь с заёмщиком и
+    оговорка об отсутствии выбытий стоят на одной странице, а числа — на следующей.
+    Обе попадают в источники, потому что без первой ответ необъясним.
+    """
+    try:
+        movement = parse_ppe_movement(document.text)
+    except PpeError:
+        return []
+
+    account_id = document.account_id or ""
+    pages = [page for page in document.pages if _PPE_MARKERS.search(page.text)]
+    if not pages:
+        pages = list(document.pages)
+    return [
+        PpeRollForwardFact(
+            account_id=account_id,
+            source=_source(document, pages[-1], authority),
+            opening=Money.from_decimal(movement.opening, Currency.USD),
+            closing=Money.from_decimal(movement.closing, Currency.USD),
+            depreciation=Money.from_decimal(movement.depreciation, Currency.USD),
+            disposals=Money.from_decimal(movement.disposals, Currency.USD),
+            supporting=tuple(_source(document, page, authority) for page in pages),
+        )
+    ]
+
+
 def build_facts(inventory: DatasetInventory) -> FactSet:
     """Прочитать все значимые документы и собрать факты с корректировками."""
     superseded = superseded_drafts(inventory.documents)
@@ -282,6 +319,10 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
             if not any(isinstance(fact, RelatedPartyPolicyFact) for fact in dossier):
                 unparsed.append(document.file_name)
             facts.extend(dossier)
+            continue
+
+        if document.kind is DocumentKind.CONSOLIDATED_REPORT:
+            facts.extend(_ppe_facts(document, authority))
             continue
 
         if document.kind not in _DISCLOSURE_KINDS:
