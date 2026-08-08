@@ -644,6 +644,8 @@ def smoke(
             "reasoning": {"effort": config.reasoning_effort},
             "input": "Скажи: готово",
         }
+        if config.max_output_tokens is not None:
+            request["max_output_tokens"] = config.max_output_tokens
         started = time.perf_counter()
         try:
             response = client.responses.create(**request)

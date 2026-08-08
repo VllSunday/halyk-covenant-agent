@@ -110,3 +110,25 @@ def test_offline_variable_stays_off_for_falsy_values(
 def test_flag_turns_offline_on_without_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HALYK_OFFLINE", raising=False)
     assert Settings.from_env(offline=True).offline
+
+
+def test_settings_separate_per_call_and_total_token_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HALYK_MAX_INPUT_TOKENS_PER_CALL", "60000")
+    monkeypatch.setenv("HALYK_MAX_TOTAL_INPUT_TOKENS", "100000")
+    monkeypatch.setenv("HALYK_MAX_OUTPUT_TOKENS", "16000")
+
+    settings = Settings.from_env()
+
+    assert settings.max_input_tokens_per_call == 60000
+    assert settings.max_total_input_tokens == 100000
+    assert settings.max_output_tokens == 16000
+    assert settings.compiler.max_output_tokens == 16000
+
+
+def test_old_input_limit_name_remains_a_total_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HALYK_MAX_TOTAL_INPUT_TOKENS", raising=False)
+    monkeypatch.setenv("HALYK_MAX_INPUT_TOKENS", "90000")
+
+    assert Settings.from_env().max_total_input_tokens == 90000

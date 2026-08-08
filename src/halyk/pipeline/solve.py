@@ -260,7 +260,11 @@ def _rejections(engines: Engines) -> list[Note]:
     """
     return [
         Note(
-            code="model_answer_rejected",
+            code=(
+                "provider_request_rejected"
+                if call.provider_status is not None or call.provider_error_code is not None
+                else "model_answer_rejected"
+            ),
             subject=f"{call.role.value}/{call.account_id}, попытка {call.attempt}",
             detail=call.note,
         )

@@ -287,8 +287,16 @@ class CategoryClassifier:
 
     def _estimate(self, rows: Sequence[TransactionInput]) -> int:
         """Грубая оценка входных токенов до вызова. Точное число приходит потом."""
-        body = INSTRUCTIONS + json.dumps([row.payload() for row in rows], ensure_ascii=False)
-        return len(body) // CHARS_PER_TOKEN
+        body = json.dumps(
+            {
+                "instructions": INSTRUCTIONS,
+                "input": [row.payload() for row in rows],
+                "schema": SCHEMA,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return (len(body) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
 
     def _ask(
         self, rows: Sequence[TransactionInput]
@@ -317,6 +325,8 @@ class CategoryClassifier:
                 }
             },
         }
+        if self.config.max_output_tokens is not None:
+            request["max_output_tokens"] = self.config.max_output_tokens
         response = client.responses.create(**request)
         parsed: dict[str, Any] = json.loads(response.output_text)
         usage = response.usage

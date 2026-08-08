@@ -87,7 +87,9 @@ def build_engines(context: RunContext) -> Engines:
     settings = context.settings
     budget = Budget(
         max_live_calls=settings.max_live_calls,
-        max_input_tokens=settings.max_input_tokens,
+        max_input_tokens_per_call=settings.max_input_tokens_per_call,
+        max_total_input_tokens=settings.max_total_input_tokens,
+        max_output_tokens=settings.max_output_tokens,
         max_estimated_cost=settings.max_cost_usd,
         price_input_per_million=settings.price_input_per_million,
         price_output_per_million=settings.price_output_per_million,

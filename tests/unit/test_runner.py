@@ -24,7 +24,9 @@ from halyk.llm.runner import (
     Role,
     StructuredModelRunner,
     batch_by_account,
+    send_to_openai,
 )
+from halyk.pipeline.metrics import from_runner
 
 SCHEMA: dict[str, Any] = {"type": "object", "properties": {"value": {"type": "integer"}}}
 
@@ -58,6 +60,12 @@ class Responder:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome, (100, 20), f"req-{self.sent}"
+
+
+class ProviderError(RuntimeError):
+    status_code = 400
+    code = "invalid_json_schema"
+    request_id = "req-rejected"
 
 
 def runner(
@@ -175,12 +183,13 @@ def test_transport_retries_count_against_the_limit(tmp_path: Path) -> None:
         engine.run(request(), parse)
     assert responder.sent == 2
     assert engine.budget.live_calls == 2
+    assert from_runner(engine, Role.COMPILER).live_calls == 2
 
 
 def test_input_token_limit_is_checked_before_sending(tmp_path: Path) -> None:
     engine = runner(
         tmp_path,
-        budget=Budget(max_input_tokens=5),
+        budget=Budget(max_input_tokens_per_call=5),
         responder=(responder := Responder({"value": 1})),
     )
 
@@ -189,9 +198,55 @@ def test_input_token_limit_is_checked_before_sending(tmp_path: Path) -> None:
     assert responder.sent == 0
 
 
+def test_total_input_token_limit_counts_multiple_calls() -> None:
+    budget = Budget(max_total_input_tokens=10)
+    budget.authorise(6)
+    with pytest.raises(BudgetError):
+        budget.authorise(5)
+
+
+def test_request_estimate_includes_schema_and_retry_instruction() -> None:
+    small = request()
+    large = replace(
+        small,
+        schema={
+            "type": "object",
+            "properties": {f"field_{index}": {"type": "string"} for index in range(50)},
+        },
+    )
+
+    assert large.estimated_input_tokens() > small.estimated_input_tokens()
+    assert small.estimated_input_tokens(attempt=2) > small.estimated_input_tokens(attempt=1)
+
+
+def test_output_limit_reaches_the_responses_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class Responses:
+        @staticmethod
+        def create(**kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return type(
+                "Response",
+                (),
+                {"output_text": '{"value": 1}', "usage": None, "_request_id": "req-1"},
+            )()
+
+    class Client:
+        responses = Responses()
+
+    monkeypatch.setattr("openai.OpenAI", lambda **kwargs: Client())
+    config = ModelConfig(name="test-model", api_key="sk-test", max_output_tokens=16000)
+
+    send_to_openai(config, request(), "sk-test", 1)
+
+    assert captured["max_output_tokens"] == 16000
+
+
 def test_cost_limit_stops_the_next_call(tmp_path: Path) -> None:
     budget = Budget(
-        max_estimated_cost=Decimal("0.0001"),
+        max_output_tokens=20,
+        max_estimated_cost=Decimal("0.002"),
         price_input_per_million=Decimal(10),
         price_output_per_million=Decimal(30),
     )
@@ -281,6 +336,24 @@ def test_non_transport_error_is_not_retried(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="bad request"):
         engine.run(request(), parse)
     assert responder.sent == 1
+
+
+def test_provider_rejection_is_visible_in_stage_telemetry(tmp_path: Path) -> None:
+    engine = runner(tmp_path, responder=(responder := Responder(ProviderError("bad schema"))))
+
+    with pytest.raises(ProviderError):
+        engine.run(request(), parse)
+
+    assert responder.sent == 1
+    assert engine.budget.live_calls == 1
+    assert engine.budget.estimated_cost == 0
+    assert len(engine.calls) == 1
+    record = engine.calls[0].record()
+    assert record["provider_status"] == 400
+    assert record["provider_error_code"] == "invalid_json_schema"
+    assert record["request_id"] == "req-rejected"
+    assert record["valid"] is False
+    assert from_runner(engine, Role.COMPILER).live_calls == 1
 
 
 # --- телеметрия и батчирование ------------------------------------------------

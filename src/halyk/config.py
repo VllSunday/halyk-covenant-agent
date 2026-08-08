@@ -32,6 +32,7 @@ class ModelConfig:
     reasoning_effort: str = "medium"
     timeout_seconds: float = 90.0
     max_retries: int = 2
+    max_output_tokens: int | None = None
     offline: bool = False
 
     def authorise_live_call(self, purpose: str) -> str:
@@ -76,7 +77,9 @@ class Settings:
     # Потолок расходов прогона. Пустое значение — без потолка: в боевом окне лимит
     # ставится осознанно, а тихое ограничение хуже отсутствующего.
     max_live_calls: int | None = None
-    max_input_tokens: int | None = None
+    max_input_tokens_per_call: int | None = None
+    max_total_input_tokens: int | None = None
+    max_output_tokens: int | None = None
     max_cost_usd: Decimal | None = None
     # Цена за миллион токенов. Нужна только затем, чтобы потолок стоимости не был
     # декоративным: без неё расход прогона всегда равен нулю и лимит не сработает.
@@ -90,6 +93,12 @@ class Settings:
         api_key = os.getenv("OPENAI_API_KEY")
         offline = offline or os.getenv("HALYK_OFFLINE", "") not in ("", "0", "false", "no")
         cost = os.getenv("HALYK_MAX_COST_USD", "").strip()
+        max_output_tokens = _optional_int("HALYK_MAX_OUTPUT_TOKENS")
+        # Старое имя означало совокупный расход прогона. Оставляем его как
+        # совместимый запасной вариант, чтобы существующий .env не снял лимит молча.
+        max_total_input_tokens = _optional_int("HALYK_MAX_TOTAL_INPUT_TOKENS")
+        if max_total_input_tokens is None:
+            max_total_input_tokens = _optional_int("HALYK_MAX_INPUT_TOKENS")
         return cls(
             # Компиляция ковенанта — самый дорогой по последствиям шаг: ошибка здесь
             # ломает все три ячейки заёмщика сразу, поэтому уровень рассуждения выше.
@@ -97,6 +106,7 @@ class Settings:
                 name=os.getenv("HALYK_COMPILER_MODEL", DEFAULT_MODEL),
                 api_key=api_key,
                 reasoning_effort=os.getenv("HALYK_COMPILER_EFFORT", "high"),
+                max_output_tokens=max_output_tokens,
                 offline=offline,
             ),
             # Распознавание — задача восприятия, а не рассуждения; высокий уровень
@@ -113,12 +123,14 @@ class Settings:
                 name=os.getenv("HALYK_CLASSIFIER_MODEL", DEFAULT_MODEL),
                 api_key=api_key,
                 reasoning_effort=os.getenv("HALYK_CLASSIFIER_EFFORT", "medium"),
+                max_output_tokens=max_output_tokens,
                 offline=offline,
             ),
             verifier=ModelConfig(
                 name=os.getenv("HALYK_VERIFIER_MODEL", DEFAULT_MODEL),
                 api_key=api_key,
                 reasoning_effort=os.getenv("HALYK_VERIFIER_EFFORT", "xhigh"),
+                max_output_tokens=max_output_tokens,
                 offline=offline,
             ),
             artifacts_dir=Path(os.getenv("HALYK_ARTIFACTS_DIR", "artifacts")),
@@ -126,7 +138,9 @@ class Settings:
             team=os.getenv("HALYK_TEAM", "").strip(),
             contact_email=os.getenv("HALYK_CONTACT_EMAIL", "").strip(),
             max_live_calls=_optional_int("HALYK_MAX_LIVE_CALLS"),
-            max_input_tokens=_optional_int("HALYK_MAX_INPUT_TOKENS"),
+            max_input_tokens_per_call=_optional_int("HALYK_MAX_INPUT_TOKENS_PER_CALL"),
+            max_total_input_tokens=max_total_input_tokens,
+            max_output_tokens=max_output_tokens,
             max_cost_usd=Decimal(cost) if cost else None,
             price_input_per_million=Decimal(os.getenv("HALYK_PRICE_INPUT_PER_MTOK", "0")),
             price_output_per_million=Decimal(os.getenv("HALYK_PRICE_OUTPUT_PER_MTOK", "0")),
