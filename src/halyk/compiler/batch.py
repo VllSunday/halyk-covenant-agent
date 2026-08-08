@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -44,8 +45,15 @@ from halyk.llm.documents import index, own_documents, render, source_hashes
 from halyk.llm.runner import Request, Role, StructuredModelRunner
 from halyk.llm.schema import strict_schema
 from halyk.models.classification import TransactionCategory
-from halyk.models.document import DocumentFacts
+from halyk.models.document import DocumentFacts, DocumentKind
 from halyk.models.fact import Fact
+from halyk.models.formula import (
+    CovenantFormula,
+    Difference,
+    Direction,
+    LedgerSum,
+    Selector,
+)
 from halyk.models.source import SourceAuthority
 
 SCHEMA_NAME = "compiler_response"
@@ -63,6 +71,12 @@ CATEGORIES = tuple(
 # ответ со ссылкой на несуществующий файл дошёл до валидатора и получил внятный код
 # отказа, а не упал на длине хеша внутри pydantic.
 _UNKNOWN_HASH = "0" * 64
+
+_DISCLOSED_EBITDA = re.compile(
+    r"\bEBITDA\b.{0,100}(?:amounts?\s+to|состав(?:ляет|ила)|равн\w*)\s*"
+    r"(?:USD\s*|\$\s*)?[0-9]",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class ClauseRejectedError(ValueError):
@@ -139,6 +153,64 @@ def normalise_periods(clauses: Sequence[CompiledClause]) -> tuple[CompiledClause
     return tuple(
         clause.model_copy(update={"period_start": start, "period_end": end}) for clause in clauses
     )
+
+
+def _ebitda_is_disclosed(documents: Iterable[DocumentFacts]) -> bool:
+    """Есть ли готовое значение EBITDA вне самого договора."""
+    return any(
+        document.kind is not DocumentKind.LOAN_AGREEMENT and _DISCLOSED_EBITDA.search(page.text)
+        for document in documents
+        for page in document.pages
+    )
+
+
+def _expand_ebitda(value: Any) -> Any:
+    """Заменить узел EBITDA стандартным определением из статей реестра."""
+    if isinstance(value, dict):
+        if value.get("op") == "fact_value" and str(value.get("fact_kind", "")).casefold() in {
+            "ebitda",
+            "borrower_ebitda",
+        }:
+            return Difference(
+                left=LedgerSum(
+                    selector=Selector(
+                        categories=(TransactionCategory.REVENUE,), direction=Direction.INFLOW
+                    )
+                ),
+                right=LedgerSum(
+                    selector=Selector(
+                        categories=(TransactionCategory.OPEX,), direction=Direction.OUTFLOW
+                    )
+                ),
+            ).model_dump(mode="python")
+        return {key: _expand_ebitda(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return type(value)(_expand_ebitda(item) for item in value)
+    return value
+
+
+def normalise_derived_metrics(
+    clauses: Sequence[CompiledClause], documents: Iterable[DocumentFacts]
+) -> tuple[CompiledClause, ...]:
+    """Развернуть стандартную EBITDA, если готовое значение нигде не раскрыто."""
+    if _ebitda_is_disclosed(documents):
+        return tuple(clauses)
+    found = []
+    for clause in clauses:
+        kinds = {item.fact_kind.casefold() for item in clause.required_facts}
+        if not kinds.intersection({"ebitda", "borrower_ebitda"}):
+            found.append(clause)
+            continue
+        formula = CovenantFormula.model_validate(
+            _expand_ebitda(clause.formula.model_dump(mode="python"))
+        )
+        requirements = tuple(
+            item
+            for item in clause.required_facts
+            if item.fact_kind.casefold() not in {"ebitda", "borrower_ebitda"}
+        )
+        found.append(clause.model_copy(update={"formula": formula, "required_facts": requirements}))
+    return tuple(found)
 
 
 def check_authority(clause: CompiledClause) -> list[CompilationError]:
@@ -280,6 +352,7 @@ class CovenantCompiler:
     ) -> tuple[CompiledClause, ...]:
         response = CompilerResponse.model_validate(with_known_sources(payload, documents))
         clauses = normalise_periods(tuple(sorted(response.clauses, key=lambda clause: clause.cell)))
+        clauses = normalise_derived_metrics(clauses, documents.values())
 
         errors = [*check_coverage(clauses, batch.cells), *check_period(clauses)]
         for clause in clauses:

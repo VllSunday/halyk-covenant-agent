@@ -314,6 +314,15 @@ def test_two_invalid_answers_give_up(tmp_path: Path) -> None:
     assert responder.sent == 2
 
 
+def test_semantic_attempt_limit_is_configurable(tmp_path: Path) -> None:
+    responder = Responder({"wrong": 1}, {"still_wrong": 2}, {"value": 42})
+    engine = runner(tmp_path, responder=responder)
+    engine.semantic_attempts = 3
+
+    assert engine.run(request(), parse) == 42
+    assert [call.attempt for call in engine.calls] == [1, 2, 3]
+
+
 def test_invalid_answer_is_not_cached(tmp_path: Path) -> None:
     """Иначе одна испорченная запись воспроизводила бы ошибку на каждом прогоне."""
     engine = runner(tmp_path, responder=Responder({"wrong": 1}))

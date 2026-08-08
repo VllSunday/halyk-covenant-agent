@@ -322,6 +322,7 @@ class StructuredModelRunner:
     cache: ModelCache
     budget: Budget
     transport_retries: int = 2
+    semantic_attempts: int = 2
     # Отправка внедряется, а не берётся из класса: тест подставляет свою и доказывает,
     # что до сети дело не дошло, не полагаясь на возможность пропатчить метод.
     send: Sender = send_to_openai
@@ -349,7 +350,7 @@ class StructuredModelRunner:
         останавливает прогон в `cache.get`, до всякой попытки собрать клиента.
         """
         retry_note = ""
-        for attempt in (1, 2):
+        for attempt in range(1, self.semantic_attempts + 1):
             current = request
             if retry_note:
                 current = replace(
@@ -395,8 +396,8 @@ class StructuredModelRunner:
             retry_note = note
 
         raise InvalidResponseError(
-            f"{request.role}/{request.account_id}: ответ не разобрался ни с первого раза, "
-            f"ни с повтора"
+            f"{request.role}/{request.account_id}: ответ не прошёл "
+            f"{self.semantic_attempts} смысловые попытки"
         )
 
     def _parse(

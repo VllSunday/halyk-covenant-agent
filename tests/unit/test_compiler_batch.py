@@ -19,6 +19,7 @@ from halyk.compiler.batch import (
     CovenantCompiler,
     check_authority,
     check_period,
+    normalise_derived_metrics,
     normalise_periods,
 )
 from halyk.compiler.contract import (
@@ -385,6 +386,37 @@ def test_periods_without_a_majority_stay_inconsistent() -> None:
     other = clause("6.2", period=(date(2024, 1, 1), date(2024, 12, 31)))
     clauses = normalise_periods((clause("6.1"), other))
     assert [error.code for error in check_period(clauses)] == ["period_is_inconsistent"]
+
+
+def test_undisclosed_ebitda_is_expanded_from_the_ledger() -> None:
+    item = clause(
+        measure=FactValue(fact_kind="ebitda"),
+        required_facts=(need("ebitda"),),
+    )
+    normalised = normalise_derived_metrics((item,), (document(),))[0]
+    assert isinstance(normalised.formula.measure, Difference)
+    assert normalised.required_facts == ()
+
+
+def test_explicitly_disclosed_ebitda_remains_a_document_fact() -> None:
+    item = clause(
+        measure=FactValue(fact_kind="ebitda"),
+        required_facts=(need("ebitda"),),
+    )
+    notes = document("notes.pdf", kind=DocumentKind.FINANCIAL_NOTES).model_copy(
+        update={
+            "pages": (
+                PageFacts(
+                    number=1,
+                    text="EBITDA for the period amounts to $300,000.00.",
+                    char_count=47,
+                ),
+            )
+        }
+    )
+    normalised = normalise_derived_metrics((item,), (document(), notes))[0]
+    assert isinstance(normalised.formula.measure, FactValue)
+    assert normalised.required_facts == (item.required_facts[0],)
 
 
 def test_inconsistent_period_is_not_compiled(tmp_path: Path) -> None:

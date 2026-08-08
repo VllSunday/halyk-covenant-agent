@@ -107,7 +107,10 @@ def build_engines(context: RunContext) -> Engines:
     return Engines(
         compiler=CovenantCompiler(
             runner=StructuredModelRunner(
-                config=settings.compiler, cache=cache(CacheRole.COMPILER), budget=budget
+                config=settings.compiler,
+                cache=cache(CacheRole.COMPILER),
+                budget=budget,
+                semantic_attempts=3,
             )
         ),
         # Resolver работает на настройках компилятора: он читает те же документы и
