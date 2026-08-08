@@ -206,7 +206,7 @@ class OpenAIVisionOcr:
         from openai import OpenAI  # noqa: PLC0415
 
         client = OpenAI(
-            api_key=self.config.require_key(),
+            api_key=self.config.authorise_live_call("распознавание страницы"),
             timeout=self.config.timeout_seconds,
             max_retries=self.config.max_retries,
         )
@@ -269,7 +269,7 @@ class MistralOcr:
     def recognise(self, image: bytes) -> OcrResponse:
         from mistralai import Mistral  # noqa: PLC0415
 
-        client = Mistral(api_key=self.config.require_key())
+        client = Mistral(api_key=self.config.authorise_live_call("распознавание страницы"))
         encoded = base64.b64encode(image).decode("ascii")
         response = client.ocr.process(
             model=self.config.name,

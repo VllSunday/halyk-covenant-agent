@@ -278,7 +278,7 @@ class CategoryClassifier:
         from openai import OpenAI  # noqa: PLC0415
 
         client = OpenAI(
-            api_key=self.config.require_key(),
+            api_key=self.config.authorise_live_call("классификация операций"),
             timeout=self.config.timeout_seconds,
             max_retries=self.config.max_retries,
         )

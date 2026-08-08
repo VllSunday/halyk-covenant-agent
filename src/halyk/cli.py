@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from halyk import __version__
-from halyk.config import ConfigError, Settings
+from halyk.config import ConfigError, OfflineError, Settings
 from halyk.models.manifest import RunMode
 from halyk.models.submission import Submission
 from halyk.output.explain import render_explanation
@@ -67,16 +67,17 @@ def _ocr_engine(settings: Settings, *, enabled: bool) -> Any:
 
     if not enabled:
         return None
-    try:
-        settings.ocr.require_key()
-    except ConfigError as exc:
-        error_console.print(str(exc))
-        raise typer.Exit(code=2) from exc
+    if not settings.offline:
+        try:
+            settings.ocr.authorise_live_call("проверка доступа перед распознаванием")
+        except ConfigError as exc:
+            error_console.print(str(exc))
+            raise typer.Exit(code=2) from exc
     return CachedOcr(
         engine=OpenAIVisionOcr(config=settings.ocr),
         cache=ModelCache(
             directory=settings.artifacts_dir / "cache" / "ocr",
-            policy=CachePolicy.READ_WRITE,
+            policy=CachePolicy.OFFLINE if settings.offline else CachePolicy.READ_WRITE,
         ),
     )
 
@@ -93,6 +94,7 @@ def solve(
     output_path: Annotated[Path, typer.Option("--output", help="Куда записать ответ")] = Path(
         "Submission.json"
     ),
+    *,
     resume: Annotated[
         str | None,
         typer.Option("--resume", help="Продолжить прогон с указанным run_id, используя его кэш"),
@@ -105,6 +107,14 @@ def solve(
         bool,
         typer.Option("--cache-read", help="Разрешить чтение кэша при новом прогоне"),
     ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            "--cache-only",
+            help="Считать только по кэшу: сетевой клиент не создаётся, промах — ошибка",
+        ),
+    ] = False,
 ) -> None:
     """Полный прогон от архива до Submission.json.
 
@@ -115,7 +125,7 @@ def solve(
         error_console.print("--resume и --replay вместе не имеют смысла")
         raise typer.Exit(code=2)
 
-    settings = Settings.from_env()
+    settings = Settings.from_env(offline=offline)
     mode = RunMode.REPLAY if replay else RunMode.RESUME if resume else RunMode.SOLVE
     context = RunContext.create(
         settings=settings,
@@ -441,6 +451,14 @@ def classify(
     strict: Annotated[
         bool, typer.Option("--strict", help="Ненулевой код возврата при нераспознанных статьях")
     ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            "--cache-only",
+            help="Считать только по кэшу: сетевой клиент не создаётся, промах — ошибка",
+        ),
+    ] = False,
 ) -> None:
     """Отнести операции заёмщиков к статьям, которыми оперируют ковенанты.
 
@@ -456,12 +474,13 @@ def classify(
     from halyk.llm.classify import CategoryClassifier, cache_signature  # noqa: PLC0415
     from halyk.output.template import SubmissionTemplate  # noqa: PLC0415
 
-    settings = Settings.from_env()
-    try:
-        settings.classifier.require_key()
-    except ConfigError as exc:
-        error_console.print(str(exc))
-        raise typer.Exit(code=2) from exc
+    settings = Settings.from_env(offline=offline)
+    if not settings.offline:
+        try:
+            settings.classifier.authorise_live_call("проверка доступа перед классификацией")
+        except ConfigError as exc:
+            error_console.print(str(exc))
+            raise typer.Exit(code=2) from exc
 
     engine = _ocr_engine(settings, enabled=ocr)
     period = CovenantPeriod(
@@ -474,7 +493,8 @@ def classify(
 
     def cache(name: str) -> ModelCache:
         return ModelCache(
-            directory=settings.artifacts_dir / "cache" / name, policy=CachePolicy.READ_WRITE
+            directory=settings.artifacts_dir / "cache" / name,
+            policy=CachePolicy.OFFLINE if settings.offline else CachePolicy.READ_WRITE,
         )
 
     classifier = TransactionClassifier(
@@ -552,8 +572,8 @@ def smoke(
         # Отсутствие ключа — обычная ситуация настройки, а не сбой: показываем
         # причину строкой, без трассировки на пол-экрана.
         try:
-            api_key = config.require_key()
-        except ConfigError as exc:
+            api_key = config.authorise_live_call(f"smoke-проверка роли {role_name}")
+        except (ConfigError, OfflineError) as exc:
             error_console.print(str(exc))
             raise typer.Exit(code=2) from exc
 
