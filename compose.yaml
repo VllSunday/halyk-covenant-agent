@@ -1,0 +1,14 @@
+services:
+  halyk:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./submission:/submission
+      - ./artifacts:/app/artifacts
+    command:
+      - solve
+      - --input
+      - /data/dataset.zip
+      - --output
+      - /submission/attempt-1.json

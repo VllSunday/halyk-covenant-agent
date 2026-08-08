@@ -21,10 +21,10 @@ RUN uv sync --locked --no-dev
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
-COPY --from=builder /app /app
+RUN useradd --create-home --uid 1000 halyk
+COPY --from=builder --chown=halyk:halyk /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 
-RUN useradd --create-home --uid 1000 halyk && chown -R halyk:halyk /app
 USER halyk
 
 ENTRYPOINT ["halyk"]

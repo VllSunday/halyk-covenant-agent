@@ -1,4 +1,6 @@
-# halyk
+# Halyk Covenant Agent
+
+[![CI](https://github.com/VllSunday/halyk-covenant-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/VllSunday/halyk-covenant-agent/actions/workflows/ci.yml)
 
 Агент проверки ковенантов. На входе — архив с кредитными договорами,
 допсоглашениями и реестром транзакций. На выходе — по каждому ковенанту каждого
@@ -15,17 +17,19 @@
 завершённого результата. Ошибка сети, квоты или бюджета в Sol не эскалируется.
 Точная маршрутизация и её цена описаны в [ADR 0011](docs/adr/0011-tiered-model-routing.md).
 
-Состояние: путь замкнут целиком — от архива до проверенного ответа. Промпты по
-модели ещё не отлаживались, живой прогон на приватном датасете не делался.
+Состояние: путь замкнут целиком — от архива до проверенного ответа. На публичном
+наборе холодный прогон и повтор из кэша дали 36 из 36 правильных ячеек; повтор
+побайтно совпал с исходным ответом. Приватные данные в репозиторий не входят.
 
 ## Быстрый старт
 
 ```bash
 uv sync --all-groups --locked
 cp .env.example .env          # ключи моделей, команда и почта
+mkdir -p data submission
+# сохраните архив организаторов как data/dataset.zip
 
-uv run halyk solve --input data/dataset.zip --output Submission.json
-uv run halyk validate --submission Submission.json --template agentic-bank-public/submission_template.json
+uv run halyk solve --input data/dataset.zip --output submission/attempt-1.json
 ```
 
 `HALYK_MAX_CONCURRENCY=4` параллельно разбирает независимые PDF и заёмщиков.
@@ -36,13 +40,23 @@ uv run halyk validate --submission Submission.json --template agentic-bank-publi
 Состав ячеек берётся из `submission_template.json` внутри датасета; свой шаблон
 задаётся флагом `--template`.
 
-Запасной путь, если не хочется чинить окружение:
+Полная инструкция боевого дня: [docs/battle-runbook.md](docs/battle-runbook.md).
+
+## Запуск в Docker
+
+Docker — второй путь запуска с тем же lock-файлом и теми же моделями:
 
 ```bash
 docker build -t halyk-agent .
-docker run --rm --env-file .env -v $PWD/data:/data halyk-agent \
-    solve --input /data/dataset.zip --output /data/Submission.json
+docker run --rm --env-file .env \
+    -v "$PWD/data:/data" \
+    -v "$PWD/submission:/submission" \
+    -v "$PWD/artifacts:/app/artifacts" \
+    halyk-agent solve --input /data/dataset.zip --output /submission/attempt-1.json
 ```
+
+Либо одной командой `docker compose run --rm halyk`. Готовый файл появится в
+`submission/attempt-1.json`, артефакты диагностики — в `artifacts/runs/<run_id>/`.
 
 ## Как это работает
 
@@ -154,15 +168,22 @@ uv run halyk explain B-014 C-003
 кэша. `halyk audit` сверяет индекс с содержимым и говорит, хватит ли кэша для повтора.
 Подробности — [docs/adr/0010](docs/adr/0010-shared-content-addressed-cache.md).
 
-`make verify-determinism` проверяет это двумя способами: повтор из кэша обязан
-совпасть байт-в-байт, а два живых прогона на открытом датасете сравниваются, и
-измеренное расхождение публикуется здесь же.
+`make verify-determinism RUN=artifacts/runs/<run_id> INPUT=data/dataset.zip`
+дважды повторяет указанный прогон из кэша; разница обязана быть пустой. Два живых
+прогона сравниваются отдельно, потому что они расходуют бюджет API.
 
-Кэш боевого прогона в репозиторий не коммитится — это производные закрытого
-датасета. Его хеш зафиксирован в манифесте, сам артефакт передаётся по запросу.
-В репозитории лежит только `artifacts/example-run/` на открытых данных.
+Кэш прогона в репозиторий не коммитится: он содержит производные датасета. Его хеш
+зафиксирован в манифесте, сам артефакт передаётся организаторам по запросу.
 
 Подробности — [docs/adr/0006](docs/adr/0006-reproducibility-and-cache-policy.md).
+
+## Измеренный результат
+
+На публичном датасете локальный component scorer дал 36,00 из 36,00: все статусы,
+числа и улики совпали с ключом. Холодный последовательный прогон занял около 22
+минут и стоил $5,07. После него офлайн-повтор с четырьмя рабочими потоками занял
+5,18 секунды и дал тот же SHA-256 ответа. Время холодного параллельного прогона
+зависит от задержек и rate limits API, поэтому в README оно не обещается.
 
 ## Структура
 
@@ -196,6 +217,7 @@ src/halyk/
 
 ```bash
 make quality   # ruff, mypy, синхронность схем с моделями
-make test      # pytest
+make test      # pytest без сетевых вызовов
 make schemas   # перегенерировать схемы после правки моделей
+docker compose build
 ```

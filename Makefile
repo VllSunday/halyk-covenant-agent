@@ -1,9 +1,10 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup quality lint types schemas test solve validate score demo verify-determinism docker-build docker-solve clean
+.PHONY: help setup quality lint types schemas test solve validate score verify-determinism docker-build docker-solve clean
 
 INPUT ?= data/dataset.zip
 OUTPUT ?= Submission.json
 DATASET ?= agentic-bank-public
+RUN ?=
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
@@ -36,14 +37,11 @@ validate: ## Проверить ответ по схеме и по состав�
 score: ## Оценить ответ по ключу открытого датасета; только для разработки
 	uv run halyk score --submission $(OUTPUT) --ground-truth $(DATASET)/ground_truth.json
 
-demo: ## Прогон на зафиксированном примере, без ключей API
-	uv run halyk solve --input tests/fixtures/demo.zip --output artifacts/demo/Submission.json \
-		--replay artifacts/example-run
-
-verify-determinism: ## Два прогона из кэша, ответы обязаны совпасть
-	uv run halyk solve --input $(INPUT) --output /tmp/first.json --replay artifacts/example-run
-	uv run halyk solve --input $(INPUT) --output /tmp/second.json --replay artifacts/example-run
-	diff /tmp/first.json /tmp/second.json && echo "совпадает"
+verify-determinism: ## Побайтно повторить RUN дважды: make verify-determinism RUN=...
+	@test -n "$(RUN)" || (echo "задайте RUN=artifacts/runs/<run_id>" && exit 2)
+	uv run halyk solve --input $(INPUT) --output artifacts/replay-first.json --replay $(RUN)
+	uv run halyk solve --input $(INPUT) --output artifacts/replay-second.json --replay $(RUN)
+	diff artifacts/replay-first.json artifacts/replay-second.json
 
 docker-build:
 	docker build -t halyk-agent .
