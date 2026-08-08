@@ -40,7 +40,8 @@ _SECTION = re.compile(
     re.IGNORECASE,
 )
 _NO_DISPOSALS = re.compile(
-    r"(?:there\s+were\s+)?no\s+disposals|выбыти\w*\s+(?:не\s+было|отсутств\w*)", re.IGNORECASE
+    r"(?:there\s+were\s+)?no\s+disposals|выбыти\w*[^.\n]*?(?:не\s+было|отсутств\w*)",
+    re.IGNORECASE,
 )
 
 

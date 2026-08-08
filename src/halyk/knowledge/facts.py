@@ -60,6 +60,10 @@ class FactSet:
     facts: tuple[Fact, ...] = ()
     adjustments: tuple[Adjustment, ...] = ()
     unparsed_dossiers: tuple[str, ...] = field(default=())
+    # Предписывающие пункты, которых мы не поняли. Пустой список фактов и
+    # непрочитанное раскрытие выглядят одинаково, а стоят по-разному: первое
+    # означает «в документе ничего не сказано», второе — «сказано, но мимо нас».
+    unparsed_disclosures: tuple[str, ...] = field(default=())
 
     def by_account(self, account_id: str) -> tuple[Fact, ...]:
         return tuple(fact for fact in self.facts if fact.account_id == account_id)
@@ -304,6 +308,7 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
     superseded = superseded_drafts(inventory.documents)
     facts: list[Fact] = []
     adjustments: list[Adjustment] = []
+    unparsed_dossiers: list[str] = []
     unparsed: list[str] = []
 
     ordered = sorted(inventory.relevant, key=lambda doc: (doc.account_id or "", doc.file_name))
@@ -317,7 +322,7 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
         if document.kind is DocumentKind.KYC_FILE:
             dossier = _kyc_facts(document, authority)
             if not any(isinstance(fact, RelatedPartyPolicyFact) for fact in dossier):
-                unparsed.append(document.file_name)
+                unparsed_dossiers.append(document.file_name)
             facts.extend(dossier)
             continue
 
@@ -338,10 +343,13 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
             for item in notes.disclosures(page.text):
                 facts.extend(_page_facts(document, page, authority, item))
                 adjustments.extend(_page_adjustments(document, page, authority, item, status))
+                if notes.is_actionable(item) and not notes.is_recognised(item):
+                    unparsed.append(f"{document.file_name}#{item.number}")
 
     adjustments.extend(_fx_adjustments(facts))
     return FactSet(
         facts=tuple(facts),
         adjustments=tuple(adjustments),
-        unparsed_dossiers=tuple(unparsed),
+        unparsed_dossiers=tuple(unparsed_dossiers),
+        unparsed_disclosures=tuple(unparsed),
     )

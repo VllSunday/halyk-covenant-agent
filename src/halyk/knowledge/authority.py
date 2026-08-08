@@ -17,7 +17,11 @@ from halyk.models.source import SourceAuthority
 
 # Примечания ссылаются на отчёт, которым следует руководствоваться: «изложен в отчёте
 # о выполнении согласованных процедур № AR-2025-0634».
-_REPORT_REFERENCE = re.compile(r"согласованных процедур\s*№\s*(?P<number>[A-Z]{2}-\d{4}-\d{4})")
+_REPORT_REFERENCE = re.compile(
+    r"(?:согласованных процедур\s*№|agreed[- ]upon procedures(?:\s+report)?\s*(?:No\.?|#|№))\s*"
+    r"(?P<number>[A-Z]{2}-\d{4}-\d{4})",
+    re.IGNORECASE,
+)
 
 
 def resolve_authority(document: DocumentFacts) -> SourceAuthority:

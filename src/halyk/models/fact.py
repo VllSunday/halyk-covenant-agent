@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from halyk.knowledge.kyc import RelatedPartyPolicy
 from halyk.models.source import SourceRef
 from halyk.money import Money
 
@@ -67,6 +68,18 @@ class RelatedPartyPolicyFact(FactBase):
     @property
     def related_parties(self) -> tuple[str, ...]:
         return tuple(h.counterparty for h in self.holdings if h.share >= self.threshold)
+
+    def as_policy(self) -> RelatedPartyPolicy:
+        """Обратный переход к разобранной политике для построения индекса.
+
+        Факт хранится в артефакте прогона, а индекс строится из политики: без этого
+        моста пришлось бы либо разбирать досье второй раз, либо тащить политику мимо
+        артефакта, и они разошлись бы при первой же правке разбора.
+        """
+        return RelatedPartyPolicy(
+            threshold=self.threshold,
+            holdings=tuple((h.counterparty, h.share) for h in self.holdings),
+        )
 
 
 class CollateralCoverageFact(FactBase):

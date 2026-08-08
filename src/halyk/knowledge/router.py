@@ -46,6 +46,7 @@ _KIND_MARKERS: tuple[tuple[DocumentKind, tuple[str, ...]], ...] = (
             "ОТЧЁТОВЫПОЛНЕНИИСОГЛАСОВАННЫХПРОЦЕДУР",
             "ВЕДОМОСТЬВОПРОСОВПОКЛАССИФИКАЦИИ",
             "AGREEDUPONPROCEDURES",
+            "AGREED-UPONPROCEDURES",
             "CLASSIFICATIONQUERYSCHEDULE",
         ),
     ),
@@ -76,9 +77,24 @@ _KIND_MARKERS: tuple[tuple[DocumentKind, tuple[str, ...]], ...] = (
     ),
 )
 
-_SUPERSEDED_MARKERS = ("НЕДЕЙСТВУЮЩАЯРЕДАКЦИЯ", "НЕПРИМЕНЯЕТСЯ")
-_DRAFT_MARKERS = ("НЕЯВЛЯЕТСЯОКОНЧАТЕЛЬНОЙПОЗИЦИЕЙ", "ПРОМЕЖУТОЧНАЯВЕДОМОСТЬ")
-_FINAL_MARKERS = ("ОКОНЧАТЕЛЬНОЙПОЗИЦИЕЙАУДИТОРА",)
+_SUPERSEDED_MARKERS = (
+    "НЕДЕЙСТВУЮЩАЯРЕДАКЦИЯ",
+    "НЕПРИМЕНЯЕТСЯ",
+    "SUPERSEDEDEDITION",
+    "NOLONGERINEFFECT",
+    "DOESNOTAPPLY",
+)
+_DRAFT_MARKERS = (
+    "НЕЯВЛЯЕТСЯОКОНЧАТЕЛЬНОЙПОЗИЦИЕЙ",
+    "ПРОМЕЖУТОЧНАЯВЕДОМОСТЬ",
+    "NOTTHEFINALPOSITION",
+    "INTERIMSCHEDULE",
+    "DRAFTSCHEDULE",
+)
+# Отрицание проверяется раньше утверждения: «is not the final position of the auditor»
+# содержит в себе «the final position of the auditor», и при обратном порядке
+# промежуточная ведомость опозналась бы как окончательный отчёт.
+_FINAL_MARKERS = ("ОКОНЧАТЕЛЬНОЙПОЗИЦИЕЙАУДИТОРА", "FINALPOSITIONOFTHEAUDITOR")
 
 
 def squeeze(text: str) -> str:
