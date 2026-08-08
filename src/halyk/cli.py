@@ -660,6 +660,176 @@ def smoke(
         )
 
 
+_GRADE_STYLE = {"GREEN": "green", "YELLOW": "yellow", "RED": "red"}
+
+# Причина в таблице обрезается: у упавшего заёмщика она повторяется в каждой его
+# ячейке, и полный текст превращает отчёт в стену. Целиком он лежит в report.json.
+_REASON_LIMIT = 140
+
+
+def _grade_cell(value: str) -> str:
+    return f"[{_GRADE_STYLE[value]}]{value}[/{_GRADE_STYLE[value]}]"
+
+
+def _short(text: str, limit: int = _REASON_LIMIT) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+@app.command()
+def audit(
+    run: Annotated[
+        Path | None,
+        typer.Option("--run", help="Каталог прогона; по умолчанию последний"),
+    ] = None,
+    show_all: Annotated[
+        bool, typer.Option("--all", help="Показать все ячейки, а не только рискованные")
+    ] = False,
+) -> None:
+    """Разобрать готовый прогон: покрытие, риск по ячейкам, расход, повторяемость.
+
+    Это оценка риска, а не точности. Точность известна только против ключа, а у
+    приватного прогона ключа нет — называть одно другим значит перестать отличать
+    «проверено» от «верно».
+    """
+    from halyk.audit import AuditError, check_replay, counts, grade_run, load  # noqa: PLC0415
+
+    settings = Settings.from_env()
+    run_dir = run or _latest_run(settings.artifacts_dir)
+    try:
+        view = load(run_dir)
+    except AuditError as exc:
+        error_console.print(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    graded = grade_run(view)
+    tally = counts(graded)
+    console.print(
+        f"Прогон [bold]{view.run_id}[/bold] ({view.mode}), статус {view.status}, "
+        f"ячеек {view.answered} из {view.template_cells} ({view.coverage:.0%})"
+    )
+
+    table = Table(title="Ячейки")
+    for column in ("ячейка", "риск", "вердикт", "число", "улика", "почему"):
+        table.add_column(column, overflow="fold")
+    for item in graded:
+        if not show_all and item.grade.value == "GREEN":
+            continue
+        cell = item.cell
+        table.add_row(
+            item.name,
+            _grade_cell(item.grade.value),
+            cell.status if cell else "—",
+            str(cell.actual) if cell else "—",
+            (cell.evidence_txn_id or "—") if cell else "—",
+            _short("; ".join(item.reasons)),
+        )
+    if table.row_count:
+        console.print(table)
+    console.print(
+        "Риск: " + ", ".join(f"{_grade_cell(name)} {count}" for name, count in tally.items())
+    )
+
+    open_requirements = view.problems_with("requirement_is_")
+    console.print(
+        f"Открытых требований {len(open_requirements)}, "
+        f"инвариантов не прошло {view.metrics.get('invariants_failed', 0)}, "
+        f"ячеек с источником {sum(1 for c in view.cells.values() if c.sources)} из {view.answered}"
+    )
+    for problem in open_requirements:
+        error_console.print(f"{problem['code']} {problem['subject']}: {problem['detail']}")
+
+    stages = Table(title="Расход по стадиям")
+    for column in ("стадия", "вызовов", "из кэша", "токенов вход", "токенов выход", "секунд"):
+        stages.add_column(column, justify="right")
+    for name, stage in sorted(view.metrics.get("stages", {}).items()):
+        stages.add_row(
+            name,
+            str(stage["calls"]),
+            str(stage["cache_hits"]),
+            str(stage["tokens_in"]),
+            str(stage["tokens_out"]),
+            f"{stage['seconds']:.1f}",
+        )
+    console.print(stages)
+    console.print(
+        f"Всего вызовов {view.metrics.get('llm_calls', 0)}, живых "
+        f"{view.metrics.get('live_calls', 0)}, стоимость "
+        f"{view.metrics.get('estimated_cost_usd', '0')} USD, "
+        f"{view.metrics.get('runtime_seconds', 0.0):.1f} c"
+    )
+
+    replay = check_replay(view, settings.artifacts_dir / "cache")
+    if replay.deterministic:
+        console.print(f"[green]Повтор из кэша возможен: {replay.total} записей на месте[/green]")
+    else:
+        error_console.print(
+            f"Повтор из кэша неполон: нет {len(replay.missing)}, изменилось "
+            f"{len(replay.changed)} из {replay.total}"
+        )
+
+    if state := view.last_known_good.get("detail"):
+        console.print(f"[dim]Файл ответа: {state}[/dim]")
+    if tally["RED"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def compare(
+    baseline: Annotated[Path, typer.Option("--baseline", exists=True, file_okay=False)],
+    candidate: Annotated[Path, typer.Option("--candidate", exists=True, file_okay=False)],
+) -> None:
+    """Сравнить два прогона по ячейкам и вернуть ненулевой код при регрессии.
+
+    Регрессия — это потеря: пропавшая ячейка, ухудшившийся риск, новое открытое
+    требование. Изменившееся число регрессией не считается, но показывается всегда.
+    """
+    from halyk.audit import AuditError, load  # noqa: PLC0415
+    from halyk.audit import compare as compare_runs  # noqa: PLC0415
+
+    try:
+        before, after = load(baseline), load(candidate)
+    except AuditError as exc:
+        error_console.print(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    result = compare_runs(before, after)
+    console.print(f"{before.run_id} → {after.run_id}")
+
+    table = Table(title="Изменения по ячейкам")
+    for column in ("ячейка", "риск", "что изменилось"):
+        table.add_column(column, overflow="fold")
+    for diff in result.diffs:
+        if not diff.changes and diff.baseline_grade is diff.candidate_grade:
+            continue
+        table.add_row(
+            diff.name,
+            f"{_grade_cell(diff.baseline_grade.value)} → {_grade_cell(diff.candidate_grade.value)}",
+            "; ".join(diff.changes) or "только риск",
+        )
+    if table.row_count:
+        console.print(table)
+    else:
+        console.print("Ответы совпали до последней ячейки")
+
+    console.print(
+        "Риск: "
+        + ", ".join(
+            f"{_grade_cell(name)} {was} → {now}" for name, (was, now) in result.counts.items()
+        )
+    )
+    for name in result.gained:
+        console.print(f"[green]появилась ячейка {name}[/green]")
+    for name in result.lost:
+        error_console.print(f"потеряна ячейка {name}")
+    for subject in result.new_open_requirements:
+        error_console.print(f"новое открытое требование {subject}")
+    for diff in result.regressions:
+        error_console.print(f"регресс {diff.name}: {'; '.join(diff.changes) or 'риск вырос'}")
+
+    if result.has_regression:
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def explain(
     borrower_id: Annotated[str, typer.Argument(help="Идентификатор заёмщика")],
