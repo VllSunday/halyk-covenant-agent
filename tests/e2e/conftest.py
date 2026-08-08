@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -27,8 +28,9 @@ from halyk.compiler.contract import (
     FactRequirement,
 )
 from halyk.config import ModelConfig, Settings
+from halyk.ingest.inventory import build_inventory
 from halyk.knowledge.classifier import TransactionClassifier
-from halyk.llm.cache import ModelCache
+from halyk.llm.cache import CacheJournal, CachePolicy, CacheRole, ModelCache
 from halyk.llm.classify import CategoryClassifier, TransactionInput
 from halyk.llm.runner import Budget, Request, StructuredModelRunner
 from halyk.models.classification import TransactionCategory as Cat
@@ -46,6 +48,7 @@ from halyk.models.formula import (
 from halyk.models.manifest import RunMode
 from halyk.models.source import SourceRef
 from halyk.money import Currency
+from halyk.parsing.ocr import CachedOcr, OcrResponse, OpenAIVisionOcr
 from halyk.pipeline.engines import Engines
 from halyk.resolution.batch import RequirementResolver
 from halyk.resolution.contract import Evidence, ResolvedFact, ResolverResponse
@@ -126,6 +129,8 @@ lender shall not exceed $150,000.00 during the measurement period.
 
 Clause 6.2 Payroll costs shall not exceed $400,000.00 during the measurement period.
 
+Clause 6.3 EBITDA for the period shall not be less than $250,000.00.
+
 Account ACC-4002
 """
 
@@ -145,9 +150,10 @@ related parties for the purposes of the Agreement.
 Account ACC-4002
 """
 
-# Обязательство названо так, что детерминированный слой его не разбирает: пункт не
-# пронумерован, формулировка не шаблонная. Ровно этот случай и достаётся resolver.
+# Обе величины названы так, что детерминированный слой их не разбирает: пункты не
+# пронумерованы, формулировки не шаблонные. Ровно этот случай и достаётся resolver.
 E2_GUARANTEE_QUOTE = "the amount covered by the guarantee at the reporting date is $45,000.00"
+E2_EBITDA_QUOTE = "EBITDA for the period, as defined in the Agreement, amounts to $300,000.00"
 E2_NOTES = f"""NOTES TO THE FINANCIAL STATEMENTS
 Account ACC-4002
 
@@ -155,8 +161,14 @@ Note 12. Guarantees. The Company stands behind a guarantee issued in favour of t
 lender; {E2_GUARANTEE_QUOTE}.
 
 Note 13. All settlements with utility providers were made in cash during the period.
+
+Note 14. {E2_EBITDA_QUOTE}.
 Account ACC-4002
 """
+
+# Страница без текстового слоя: одна картинка на весь лист. Нужна затем, чтобы
+# распознавание в прогоне было настоящим, а не предполагаемым.
+LEAFLET = "Marketing leaflet for the regional office. Opening hours and directions."
 
 LEDGER = """txn_id,date,account_id,counterparty,description,amount,currency
 TXN-E1-0001,2025-03-01,ACC-4001,Sarybel Capital L.L.P.,Advisory services,-250000.00,USD
@@ -175,7 +187,7 @@ TEMPLATE: dict[str, Any] = {
     "model": "",
     "answers": {
         "E1": {"6.1": dict(BLANK), "6.2": dict(BLANK)},
-        "E2": {"6.1": dict(BLANK), "6.2": dict(BLANK)},
+        "E2": {"6.1": dict(BLANK), "6.2": dict(BLANK), "6.3": dict(BLANK)},
     },
 }
 
@@ -199,6 +211,17 @@ def write_pdf(path: Path, text: str) -> None:
     document.close()
 
 
+def write_scan(path: Path) -> None:
+    """Лист, на котором только растр: текстового слоя нет, и без OCR он пустой."""
+    document = fitz.open()
+    page = document.new_page()
+    pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 600, 800))
+    pixmap.set_rect(pixmap.irect, (235, 235, 235))
+    page.insert_image(page.rect, pixmap=pixmap)
+    document.save(path)
+    document.close()
+
+
 @pytest.fixture(scope="session")
 def dataset(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("english-e2e")
@@ -213,6 +236,7 @@ def dataset(tmp_path_factory: pytest.TempPathFactory) -> Path:
         ("e2-notes.pdf", E2_NOTES),
     ):
         write_pdf(root / "documents" / name, text)
+    write_scan(root / "documents" / "leaflet.pdf")
     (root / "master_ledger_2025.csv").write_text(LEDGER, encoding="utf-8")
     (root / "submission_template.json").write_text(
         json.dumps(TEMPLATE, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -224,13 +248,18 @@ def dataset(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def requirement(
-    requirement_id: str, scenario: str, account: str, description: str
+    requirement_id: str,
+    scenario: str,
+    account: str,
+    description: str,
+    *,
+    kind: str = "aggregate_obligation",
 ) -> FactRequirement:
     return FactRequirement(
         requirement_id=requirement_id,
         scenario_id=scenario,
         account_id=account,
-        fact_kind="aggregate_obligation",
+        fact_kind=kind,
         description=description,
         unit=Unit.MONEY,
         currency=Currency.USD,
@@ -248,6 +277,7 @@ def clause(
     threshold: str,
     quote: str,
     file_name: str,
+    operator: Operator = Operator.LE,
     requirements: tuple[FactRequirement, ...] = (),
 ) -> CompiledClause:
     return CompiledClause(
@@ -256,7 +286,7 @@ def clause(
             clause_id=clause_id,
             title=title,
             measure=measure,
-            operator=Operator.LE,
+            operator=operator,
             threshold=Constant(value=Decimal(threshold)),
             unit=Unit.MONEY,
             source_refs=(SourceRef(file_hash=UNKNOWN_HASH, file_name=file_name, page=1),),
@@ -274,6 +304,10 @@ E1_RESTRUCTURING = requirement(
 )
 E2_GUARANTEE = requirement(
     "e2-guarantee", "E2", E2_ACCOUNT, "guarantee obligation disclosed to the lender"
+)
+# Вида `ebitda` среди специализированных фактов нет: величина доедет до расчёта общей.
+E2_EBITDA = requirement(
+    "e2-ebitda", "E2", E2_ACCOUNT, "EBITDA за период по определению договора", kind="ebitda"
 )
 
 
@@ -340,6 +374,17 @@ def e2_clauses() -> tuple[CompiledClause, ...]:
             quote="Payroll costs shall not exceed $400,000.00 during the measurement period",
             file_name="e2-agreement.pdf",
         ),
+        clause(
+            "E2",
+            "6.3",
+            "EBITDA",
+            FactValue(fact_kind="ebitda"),
+            operator=Operator.GE,
+            threshold="250000",
+            quote="EBITDA for the period shall not be less than $250,000.00",
+            file_name="e2-agreement.pdf",
+            requirements=(E2_EBITDA,),
+        ),
     )
 
 
@@ -359,6 +404,19 @@ def resolved_guarantee(amount: str = "45000") -> ResolvedFact:
     )
 
 
+def resolved_ebitda(amount: str = "300000") -> ResolvedFact:
+    """Величина вида, которого среди специализированных фактов нет."""
+    return ResolvedFact(
+        requirement_id="e2-ebitda",
+        fact_kind="ebitda",
+        amount=Decimal(amount),
+        unit=Unit.MONEY,
+        currency=Currency.USD,
+        evidence=(Evidence(file_name="e2-notes.pdf", page=1, quote=E2_EBITDA_QUOTE),),
+        confidence=0.85,
+    )
+
+
 def resolved(**parts: Any) -> dict[str, Any]:
     return ResolverResponse(**parts).model_dump(mode="json")
 
@@ -368,7 +426,7 @@ def compiler_answers() -> dict[str, list[dict[str, Any]]]:
 
 
 def resolver_answers() -> dict[str, list[dict[str, Any]]]:
-    return {E2_ACCOUNT: [resolved(facts=(resolved_guarantee(),))]}
+    return {E2_ACCOUNT: [resolved(facts=(resolved_guarantee(), resolved_ebitda()))]}
 
 
 # --- подставные роли ----------------------------------------------------------
@@ -416,6 +474,52 @@ class ScriptedClassifier(CategoryClassifier):
         return {"items": items}, (30, 10, 40), None
 
 
+@dataclass(slots=True)
+class ScriptedOcr(OpenAIVisionOcr):
+    """Боевой ключ кэша без сети.
+
+    Наследование здесь не украшение: ключ считается по имени движка и его подписи, и
+    подставной движок со своим именем проверял бы кэш, которого в бою не будет.
+    """
+
+    calls: int = 0
+
+    def recognise(self, image: bytes) -> OcrResponse:
+        self.calls += 1
+        return OcrResponse(text=LEAFLET, input_tokens=900, output_tokens=100, total_tokens=1000)
+
+
+def prime_ocr_cache(settings: Settings, dataset: Path) -> ScriptedOcr:
+    """Распознать страницы заранее — ровно то, что делает `halyk inventory --ocr`.
+
+    Кэш общий, поэтому оплаченная здесь страница обязана стать попаданием в прогоне.
+    """
+    engine = ScriptedOcr(config=settings.ocr)
+    build_inventory(
+        dataset,
+        ["E1", "E2"],
+        CachedOcr(
+            engine=engine,
+            cache=ModelCache(
+                directory=settings.cache_dir(CacheRole.OCR.value),
+                policy=CachePolicy.READ_WRITE,
+                role=CacheRole.OCR.value,
+            ),
+        ),
+    )
+    return engine
+
+
+def shared_cache(context: RunContext, role: CacheRole, journal: CacheJournal | None = None):  # type: ignore[no-untyped-def]
+    """Кэш той же формы, что в бою: общий каталог, роль и журнал прогона."""
+    return ModelCache(
+        directory=context.settings.cache_dir(role.value),
+        policy=context.cache_policy,
+        role=role.value,
+        journal=journal,
+    )
+
+
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Живой вызов в этих тестах — падение, а не расход."""
@@ -442,6 +546,7 @@ def make_context(
         mode: RunMode = RunMode.SOLVE,
         run_id: str = "e2e",
         offline: bool = False,
+        fresh: bool = False,
         max_live_calls: int | None = None,
     ) -> RunContext:
         if max_live_calls is not None:
@@ -451,6 +556,7 @@ def make_context(
             input_path=dataset,
             mode=mode,
             run_id=run_id,
+            fresh=fresh,
         )
 
     return build
@@ -468,15 +574,16 @@ def make_engines() -> Callable[..., Engines]:
     ) -> Engines:
         budget = Budget(max_live_calls=context.settings.max_live_calls)
         config = ModelConfig(name="test-model", api_key="sk-test", offline=context.settings.offline)
+        journal = CacheJournal()
 
-        def cache(role: str) -> ModelCache:
-            return ModelCache(directory=context.cache_dir / role, policy=context.cache_policy)
+        def cache(role: CacheRole) -> ModelCache:
+            return shared_cache(context, role, journal)
 
         return Engines(
             compiler=CovenantCompiler(
                 runner=StructuredModelRunner(
                     config=config,
-                    cache=cache("compiler"),
+                    cache=cache(CacheRole.COMPILER),
                     budget=budget,
                     send=Scripted(compiler if compiler is not None else compiler_answers()),
                 )
@@ -484,17 +591,24 @@ def make_engines() -> Callable[..., Engines]:
             resolver=RequirementResolver(
                 runner=StructuredModelRunner(
                     config=config,
-                    cache=cache("resolver"),
+                    cache=cache(CacheRole.RESOLVER),
                     budget=budget,
                     send=Scripted(resolver if resolver is not None else resolver_answers()),
                 )
             ),
             classifier=TransactionClassifier(
-                model=ScriptedClassifier(config=config, cache=cache("classifier"), budget=budget),
-                verifier=ScriptedClassifier(config=config, cache=cache("verifier"), budget=budget),
+                model=ScriptedClassifier(
+                    config=config, cache=cache(CacheRole.CLASSIFIER), budget=budget
+                ),
+                verifier=ScriptedClassifier(
+                    config=config, cache=cache(CacheRole.VERIFIER), budget=budget
+                ),
             ),
             budget=budget,
-            ocr=None,
+            ocr=CachedOcr(
+                engine=ScriptedOcr(config=context.settings.ocr), cache=cache(CacheRole.OCR)
+            ),
+            journal=journal,
         )
 
     return build

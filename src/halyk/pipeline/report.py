@@ -83,6 +83,9 @@ class RunReport:
     answered_cells: tuple[tuple[str, str], ...] = ()
     failures: list[Problem] = field(default_factory=list)
     notes: list[Note] = field(default_factory=list)
+    # Что лежит в файле ответа сейчас. У упавшего прогона это предыдущий полный
+    # ответ, и знать про него нужно до того, как решишь сдавать.
+    last_known_good: dict[str, Any] = field(default_factory=dict)
 
     @property
     def problems(self) -> list[Problem]:
@@ -110,6 +113,7 @@ class RunReport:
             "problems": [item.record() for item in self.problems],
             "notes": [item.record() for item in self.notes],
             "invariants": self.invariants,
+            "last_known_good": self.last_known_good,
             "budget": self.budget,
             "borrowers": [report.record() for report in self.borrowers],
         }

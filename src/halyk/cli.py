@@ -64,8 +64,12 @@ def _latest_run(artifacts_dir: Path) -> Path:
 
 
 def _ocr_engine(settings: Settings, *, enabled: bool) -> Any:
-    """Движок распознавания для команд переписи. Ключ проверяется до разбора файлов."""
-    from halyk.llm.cache import CachePolicy, ModelCache  # noqa: PLC0415
+    """Движок распознавания для команд переписи. Ключ проверяется до разбора файлов.
+
+    Кэш тот же, что у сквозного прогона: страница, распознанная здесь, обязана стать
+    попаданием в `solve`, иначе перепись оплачивается дважды.
+    """
+    from halyk.llm.cache import CachePolicy, CacheRole, ModelCache  # noqa: PLC0415
     from halyk.parsing.ocr import CachedOcr, OpenAIVisionOcr  # noqa: PLC0415
 
     if not enabled:
@@ -79,8 +83,9 @@ def _ocr_engine(settings: Settings, *, enabled: bool) -> Any:
     return CachedOcr(
         engine=OpenAIVisionOcr(config=settings.ocr),
         cache=ModelCache(
-            directory=settings.artifacts_dir / "cache" / "ocr",
+            directory=settings.cache_dir(CacheRole.OCR.value),
             policy=CachePolicy.OFFLINE if settings.offline else CachePolicy.READ_WRITE,
+            role=CacheRole.OCR.value,
         ),
     )
 
@@ -115,11 +120,11 @@ def solve(
         Path | None,
         typer.Option("--replay", help="Повторить прогон из каталога artifacts/runs/<run_id>"),
     ] = None,
-    cache_read: Annotated[
+    fresh: Annotated[
         bool,
         typer.Option(
-            "--cache-read",
-            help="Разрешить чтение кэша прогона; кэш лежит в его каталоге, см. --resume",
+            "--no-cache-read",
+            help="Не читать общий кэш: спросить модели заново и переписать ответы",
         ),
     ] = False,
     offline: Annotated[
@@ -133,11 +138,13 @@ def solve(
 ) -> None:
     """Полный прогон от архива до Submission.json.
 
-    По умолчанию считает вживую и кэш только пишет. Чтение кэша включается явно —
-    иначе новый датасет мог бы получить ответы от прошлого прогона.
+    Общий кэш читается по умолчанию: ключ адресует содержимое запроса, поэтому
+    попадание означает тот же самый вопрос к той же модели. `--no-cache-read`
+    заставляет переспросить.
 
     Прогон строгий: незакрытая ячейка заканчивается ненулевым кодом возврата и
-    отчётом, а не файлом ответа с пропусками.
+    отчётом, а не файлом ответа с пропусками. Предыдущий валидный ответ при этом
+    остаётся на месте.
     """
     if resume and replay:
         error_console.print("--resume и --replay вместе не имеют смысла")
@@ -150,10 +157,10 @@ def solve(
         input_path=input_path,
         mode=mode,
         run_id=resume or (replay.name if replay else None),
-        cache_read=cache_read,
+        fresh=fresh,
     )
-    if cache_read and mode is RunMode.SOLVE:
-        console.print("[yellow]Чтение кэша включено вручную[/yellow]")
+    if fresh:
+        console.print("[yellow]Кэш не читается: все ответы будут запрошены заново[/yellow]")
 
     try:
         result = run_pipeline(context, input_path, output_path, template_path=template)
@@ -512,7 +519,7 @@ def classify(
     from halyk.ingest.normalise import CovenantPeriod, normalise  # noqa: PLC0415
     from halyk.knowledge.classifier import TransactionClassifier  # noqa: PLC0415
     from halyk.knowledge.facts import build_facts  # noqa: PLC0415
-    from halyk.llm.cache import CachePolicy, ModelCache  # noqa: PLC0415
+    from halyk.llm.cache import CachePolicy, CacheRole, ModelCache  # noqa: PLC0415
     from halyk.llm.classify import CategoryClassifier, cache_signature  # noqa: PLC0415
     from halyk.output.template import SubmissionTemplate  # noqa: PLC0415
 
@@ -533,15 +540,16 @@ def classify(
     ledger = normalise(inventory.ledger, build_facts(inventory).adjustments, period)
     accounts = sorted(inventory.scenarios.scenario_to_account.values())
 
-    def cache(name: str) -> ModelCache:
+    def cache(role: CacheRole) -> ModelCache:
         return ModelCache(
-            directory=settings.artifacts_dir / "cache" / name,
+            directory=settings.cache_dir(role.value),
             policy=CachePolicy.OFFLINE if settings.offline else CachePolicy.READ_WRITE,
+            role=role.value,
         )
 
     classifier = TransactionClassifier(
-        model=CategoryClassifier(config=settings.classifier, cache=cache("categories")),
-        verifier=CategoryClassifier(config=settings.verifier, cache=cache("categories-verifier")),
+        model=CategoryClassifier(config=settings.classifier, cache=cache(CacheRole.CLASSIFIER)),
+        verifier=CategoryClassifier(config=settings.verifier, cache=cache(CacheRole.VERIFIER)),
     )
     result = classifier.run(ledger, accounts)
 

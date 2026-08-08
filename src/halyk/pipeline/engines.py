@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from halyk.compiler.batch import CovenantCompiler
 from halyk.compiler.contract import INSTRUCTIONS as COMPILER_INSTRUCTIONS
@@ -21,7 +21,7 @@ from halyk.compiler.contract import CompilerResponse
 from halyk.hashing import sha256_payload
 from halyk.knowledge.classifier import TransactionClassifier
 from halyk.llm import classify
-from halyk.llm.cache import ModelCache
+from halyk.llm.cache import CacheJournal, CacheRole, ModelCache
 from halyk.llm.classify import CategoryClassifier
 from halyk.llm.runner import Budget, StructuredModelRunner
 from halyk.llm.schema import strict_schema
@@ -40,13 +40,14 @@ from halyk.run.context import RunContext
 
 @dataclass(frozen=True, slots=True)
 class Engines:
-    """Четыре роли прогона и общий на них бюджет."""
+    """Четыре роли прогона, общий на них бюджет и общий журнал кэша."""
 
     compiler: CovenantCompiler
     resolver: RequirementResolver
     classifier: TransactionClassifier
     budget: Budget
     ocr: CachedOcr | None = None
+    journal: CacheJournal = field(default_factory=CacheJournal)
 
 
 def prompt_digests() -> dict[str, str]:
@@ -82,7 +83,7 @@ def prompt_digests() -> dict[str, str]:
 
 
 def build_engines(context: RunContext) -> Engines:
-    """Роли прогона поверх каталога и настроек этого прогона."""
+    """Роли прогона поверх общего кэша и настроек этого прогона."""
     settings = context.settings
     budget = Budget(
         max_live_calls=settings.max_live_calls,
@@ -91,14 +92,20 @@ def build_engines(context: RunContext) -> Engines:
         price_input_per_million=settings.price_input_per_million,
         price_output_per_million=settings.price_output_per_million,
     )
+    journal = CacheJournal()
 
-    def cache(role: str) -> ModelCache:
-        return ModelCache(directory=context.cache_dir / role, policy=context.cache_policy)
+    def cache(role: CacheRole) -> ModelCache:
+        return ModelCache(
+            directory=settings.cache_dir(role.value),
+            policy=context.cache_policy,
+            role=role.value,
+            journal=journal,
+        )
 
     return Engines(
         compiler=CovenantCompiler(
             runner=StructuredModelRunner(
-                config=settings.compiler, cache=cache("compiler"), budget=budget
+                config=settings.compiler, cache=cache(CacheRole.COMPILER), budget=budget
             )
         ),
         # Resolver работает на настройках компилятора: он читает те же документы и
@@ -106,19 +113,20 @@ def build_engines(context: RunContext) -> Engines:
         # переключатель, который пришлось бы держать согласованным с компилятором.
         resolver=RequirementResolver(
             runner=StructuredModelRunner(
-                config=settings.compiler, cache=cache("resolver"), budget=budget
+                config=settings.compiler, cache=cache(CacheRole.RESOLVER), budget=budget
             )
         ),
         classifier=TransactionClassifier(
             model=CategoryClassifier(
-                config=settings.classifier, cache=cache("classifier"), budget=budget
+                config=settings.classifier, cache=cache(CacheRole.CLASSIFIER), budget=budget
             ),
             verifier=CategoryClassifier(
-                config=settings.verifier, cache=cache("verifier"), budget=budget
+                config=settings.verifier, cache=cache(CacheRole.VERIFIER), budget=budget
             ),
         ),
         # Ключ не спрашивается заранее: страница без пригодного текстового слоя может
         # и не встретиться, а отказ за отсутствие ключа тогда стоил бы прогона.
-        ocr=CachedOcr(engine=OpenAIVisionOcr(config=settings.ocr), cache=cache("ocr")),
+        ocr=CachedOcr(engine=OpenAIVisionOcr(config=settings.ocr), cache=cache(CacheRole.OCR)),
         budget=budget,
+        journal=journal,
     )

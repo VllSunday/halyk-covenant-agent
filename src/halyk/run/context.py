@@ -18,7 +18,7 @@ METRICS_NAME = "metrics.json"
 LINEAGE_NAME = "lineage.jsonl"
 REPORT_NAME = "report.json"
 SUBMISSION_NAME = "submission.json"
-CACHE_DIR_NAME = "model_cache"
+CACHE_INDEX_NAME = "cache_index.json"
 
 
 def _git(*args: str) -> str | None:
@@ -44,11 +44,11 @@ class RunContext:
     root: Path
     settings: Settings
     started_at: datetime
-    cache_read: bool = False
+    fresh: bool = False
 
     @property
-    def cache_dir(self) -> Path:
-        return self.root / CACHE_DIR_NAME
+    def cache_index_path(self) -> Path:
+        return self.root / CACHE_INDEX_NAME
 
     @property
     def lineage_path(self) -> Path:
@@ -72,19 +72,19 @@ class RunContext:
 
     @property
     def cache_policy(self) -> CachePolicy:
-        """Как этот прогон обращается с кэшем.
+        """Как этот прогон обращается с общим кэшем.
 
-        Новый прогон кэш только пишет: молчаливое чтение записей от прошлого
-        датасета дало бы ответы не про те документы. Чтение включается явно — флагом,
-        продолжением прогона или его повторением.
+        По умолчанию читает: ключ адресует содержимое запроса, поэтому попадание
+        означает тот же самый вопрос, а не ответ от прошлых данных. Отказ от чтения —
+        осознанное решение переспросить модель, и делается флагом.
         """
         if self.settings.offline:
             return CachePolicy.OFFLINE
         if self.mode is RunMode.REPLAY:
             return CachePolicy.REPLAY
-        if self.mode is RunMode.RESUME or self.cache_read:
-            return CachePolicy.READ_WRITE
-        return CachePolicy.WRITE_ONLY
+        if self.fresh:
+            return CachePolicy.WRITE_ONLY
+        return CachePolicy.READ_WRITE
 
     @classmethod
     def create(
@@ -94,21 +94,21 @@ class RunContext:
         mode: RunMode = RunMode.SOLVE,
         run_id: str | None = None,
         *,
-        cache_read: bool = False,
+        fresh: bool = False,
     ) -> RunContext:
         started = datetime.now(UTC)
         if run_id is None:
             stamp = started.strftime("%Y%m%d-%H%M%S")
             run_id = f"{stamp}-{sha256_path(input_path)[:8]}"
         root = settings.artifacts_dir / "runs" / run_id
-        (root / CACHE_DIR_NAME).mkdir(parents=True, exist_ok=True)
+        root.mkdir(parents=True, exist_ok=True)
         return cls(
             run_id=run_id,
             mode=mode,
             root=root,
             settings=settings,
             started_at=started,
-            cache_read=cache_read,
+            fresh=fresh,
         )
 
     def build_manifest(
@@ -143,6 +143,7 @@ class RunContext:
         self.manifest_path.write_text(
             manifest.model_dump_json(indent=2, exclude_none=False),
             encoding="utf-8",
+            newline="\n",
         )
 
     def finish(self, manifest: RunManifest, status: RunStatus, **updates: object) -> RunManifest:

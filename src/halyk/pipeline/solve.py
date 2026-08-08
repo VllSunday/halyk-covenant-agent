@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from halyk.execution.executor import Outcome
-from halyk.hashing import sha256_bytes, sha256_payload, sha256_tree
+from halyk.hashing import sha256_bytes, sha256_payload
 from halyk.ingest.inventory import DatasetInventory, InventoryError, build_inventory
 from halyk.ingest.ledger import LedgerError
 from halyk.ingest.scenarios import ScenarioMappingError
@@ -40,6 +40,7 @@ from halyk.models.manifest import RunMode, RunStatus
 from halyk.models.metrics import RunMetrics, StageMetrics
 from halyk.models.result import CalculationStep
 from halyk.output.template import SubmissionTemplate
+from halyk.pipeline import keeper
 from halyk.pipeline import metrics as stage_metrics
 from halyk.pipeline.borrower import AnsweredCell, BorrowerResult, solve_borrower
 from halyk.pipeline.dataset import find_template, unpack
@@ -354,8 +355,12 @@ def _metrics(
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    # Перевод строки задан явно: на Windows `write_text` иначе пишет CRLF, и отпечаток
+    # содержимого перестаёт совпадать с отпечатком файла на диске.
     path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -370,10 +375,6 @@ def solve(
     """Сквозной прогон. Бросает `PipelineError`, если ответ собрался не полностью."""
     started = time.perf_counter()
     _require_header(context)
-
-    # Файл ответа принадлежит этому прогону. Оставшийся от прошлого, он выглядел бы
-    # свежим рядом с упавшим прогоном — самая дорогая из возможных здесь ошибок.
-    output_path.unlink(missing_ok=True)
 
     dataset_root = unpack(input_path, context.root)
     template_file = find_template(dataset_root, template_path)
@@ -424,6 +425,7 @@ def solve(
         answered_cells=tuple(answers),
         failures=_errors(violations),
         notes=[*_warnings(violations), *_rejections(tools)],
+        last_known_good=keeper.status(context.settings),
     )
 
     document = (
@@ -433,10 +435,16 @@ def solve(
     )
     submission_sha: str | None = None
     if document:
+        # Файл ответа переписывается только успехом. Упавший прогон оставляет
+        # предыдущий полный ответ нетронутым — подмешивать в него свои ячейки нельзя,
+        # а забирать последнее, что было, тем более.
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(document, encoding="utf-8")
-        context.submission_path.write_text(document, encoding="utf-8")
+        output_path.write_text(document, encoding="utf-8", newline="\n")
+        context.submission_path.write_text(document, encoding="utf-8", newline="\n")
         submission_sha = sha256_bytes(document.encode("utf-8"))
+        report.last_known_good = keeper.remember(
+            context.settings, run_id=context.run_id, output_path=output_path, sha256=submission_sha
+        ).record() | {"state": "intact", "detail": f"{output_path} — ответ этого прогона"}
 
     _write_lineage(context, results)
     metrics = _metrics(
@@ -449,17 +457,21 @@ def solve(
     )
     _write_json(context.metrics_path, metrics.model_dump(mode="json"))
     _write_json(context.report_path, report.record())
+    # Индекс — это записи кэша, которыми пользовался именно этот прогон. Отпечаток
+    # всего общего каталога менялся бы от чужой работы и о нашей не говорил бы ничего.
+    _write_json(context.cache_index_path, tools.journal.index())
     context.finish(
         manifest,
         RunStatus.COMPLETED if report.is_clean else RunStatus.FAILED,
         submission_sha256=submission_sha,
-        model_cache_sha256=sha256_tree(context.cache_dir) if context.cache_dir.exists() else None,
+        model_cache_sha256=tools.journal.digest,
     )
 
     if not report.is_clean:
         raise PipelineError(
             f"Прогон не дал полного ответа: {report.summary()}. "
-            f"Подробности в {context.report_path}",
+            f"Подробности в {context.report_path}. "
+            f"Предыдущий ответ: {report.last_known_good.get('detail', '')}",
             report,
         )
     return SolveResult(

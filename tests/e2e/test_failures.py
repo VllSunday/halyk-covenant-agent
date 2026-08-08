@@ -33,7 +33,9 @@ from .conftest import (
     compiled,
     e1_clauses,
     e2_clauses,
+    prime_ocr_cache,
     resolved,
+    resolved_ebitda,
     resolved_guarantee,
 )
 
@@ -43,6 +45,11 @@ REFUSAL = {
     "explanation": "в примечаниях этой величины нет",
     "candidate_source_refs": (),
 }
+
+
+def refused_guarantee() -> dict[str, Any]:
+    """Отказ по одному требованию при закрытом втором: батч обязан ответить по каждому."""
+    return resolved(facts=(resolved_ebitda(),), unresolved_requirements=(REFUSAL,))
 
 
 def run(context: RunContext, dataset: Path, tmp_path: Path, engines: Engines) -> dict[str, Any]:
@@ -99,15 +106,13 @@ def test_resolver_refused_the_requirement(
 ) -> None:
     """Названный отказ — законный ответ модели и незакрытая ячейка одновременно."""
     context = make_context()
-    engines = make_engines(
-        context, resolver={E2_ACCOUNT: [resolved(unresolved_requirements=(REFUSAL,))]}
-    )
+    engines = make_engines(context, resolver={E2_ACCOUNT: [refused_guarantee()]})
     report = run(context, dataset, tmp_path, engines)
 
     assert "requirement_is_open" in codes(report)
     assert any("not_found" in item["detail"] for item in report["problems"])
     answered = {item["scenario_id"]: len(item["cells"]) for item in report["borrowers"]}
-    assert answered == {"E1": 2, "E2": 1}
+    assert answered == {"E1": 2, "E2": 2}
 
 
 def test_two_values_for_one_requirement_resolve_nothing(
@@ -118,7 +123,9 @@ def test_two_values_for_one_requirement_resolve_nothing(
 ) -> None:
     """Спор источников не разрешается выбором первого попавшегося."""
     context = make_context()
-    disputed = resolved(facts=(resolved_guarantee(), resolved_guarantee("52000")))
+    disputed = resolved(
+        facts=(resolved_guarantee(), resolved_guarantee("52000"), resolved_ebitda())
+    )
     engines = make_engines(context, resolver={E2_ACCOUNT: [disputed]})
 
     assert "requirement_is_ambiguous" in codes(run(context, dataset, tmp_path, engines))
@@ -139,7 +146,7 @@ def test_one_broken_borrower_keeps_the_diagnostics_of_the_others(
     report = run(context, dataset, tmp_path, make_engines(context, compiler=answers))
 
     healthy = next(item for item in report["borrowers"] if item["scenario_id"] == "E2")
-    assert len(healthy["cells"]) == 2
+    assert len(healthy["cells"]) == 3
     assert healthy["problems"] == []
     assert healthy["resolver_batches"] == 1
 
@@ -168,7 +175,10 @@ def test_offline_cache_miss_never_reaches_the_network(
     Роли здесь настоящие: подставная отправка доказала бы только то, что её не
     позвали. Конструктор сетевого клиента подменён взрывающимся на весь модуль.
     """
+    # Распознавание оплачено раньше и лежит в общем кэше: иначе прогон остановился бы
+    # на первой же странице и до вопроса к модели не дошёл.
     context = make_context(offline=True)
+    prime_ocr_cache(context.settings, dataset)
     report = run(context, dataset, tmp_path, build_engines(context))
 
     assert any("CACHE_MISS" in item["detail"] for item in report["problems"])
@@ -210,8 +220,9 @@ def test_submission_refuses_a_composition_that_differs_from_the_template(
         ("E2", "6.1"): outcome("E2", "6.1"),
         ("E2", "6.2"): outcome("E2", "6.2"),
         ("E2", "6.3"): outcome("E2", "6.3"),
+        ("E2", "6.4"): outcome("E2", "6.4"),
     }
-    with pytest.raises(CompositionError, match=r"6\.3"):
+    with pytest.raises(CompositionError, match=r"6\.4"):
         build_submission(template, make_context().settings, answers)
 
 
@@ -225,6 +236,7 @@ def test_cell_without_a_verdict_is_never_serialised(
         ("E1", "6.2"): outcome("E1", "6.2"),
         ("E2", "6.1"): outcome("E2", "6.1"),
         ("E2", "6.2"): outcome("E2", "6.2", empty=True),
+        ("E2", "6.3"): outcome("E2", "6.3"),
     }
     with pytest.raises(IncompleteCellError, match=r"E2/6\.2"):
         build_submission(template, make_context().settings, answers)
@@ -237,7 +249,7 @@ def test_repeated_failing_run_fails_the_same_way(
     make_engines: Callable[..., Engines],
 ) -> None:
     """Негодный ответ в кэш не ложится, и повтор по кэшу воспроизводит тот же отказ."""
-    refusal = {E2_ACCOUNT: [resolved(unresolved_requirements=(REFUSAL,))]}
+    refusal = {E2_ACCOUNT: [refused_guarantee()]}
     context = make_context()
     first = run(context, dataset, tmp_path, make_engines(context, resolver=refusal))
 

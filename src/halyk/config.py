@@ -133,6 +133,10 @@ class Settings:
             offline=offline,
         )
 
+    def cache_dir(self, role: str) -> Path:
+        """Каталог общего кэша под одну роль. Один на рабочий каталог, а не на прогон."""
+        return self.artifacts_dir / "cache" / role
+
     def model_versions(self) -> dict[str, str]:
         """Идёт в run_manifest, поэтому имена берутся из тех же объектов, что и вызовы."""
         return {
