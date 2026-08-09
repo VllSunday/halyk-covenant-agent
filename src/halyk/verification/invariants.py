@@ -247,7 +247,10 @@ def check_answer(
     actual, evidence = outcome.actual, outcome.evidence_txn_id
     non_negative = actual is not None and actual >= 0
     breached = outcome.triggered and actual is not None and not operator.holds(actual, threshold)
-    grounded = evidence is None or evidence in outcome.rows
+    # Улика либо участвует в расчёте, либо выведена из него правкой документа —
+    # тогда её и не должно быть среди строк, и требовать этого нельзя: именно её
+    # отсутствие и создало нарушение.
+    grounded = evidence is None or evidence in outcome.rows or outcome.evidence_from_adjustment
     return (
         InvariantCheck(
             name="actual_is_not_negative",
@@ -262,7 +265,9 @@ def check_answer(
         InvariantCheck(
             name="evidence_belongs_to_calculation",
             passed=grounded,
-            detail=None if grounded else f"{evidence} нет среди строк расчёта",
+            detail=None
+            if grounded
+            else f"{evidence} нет ни среди строк расчёта, ни среди правок документов",
         ),
     )
 

@@ -148,6 +148,10 @@ class Outcome:
     trigger_rows: tuple[str, ...] = ()
     trigger_facts: tuple[str, ...] = ()
     triggered: bool = True
+    # Улика найдена откатом правки документа, а не изъятием строки расчёта. Такая
+    # операция в строках расчёта не значится по построению: документ вывел её оттуда,
+    # и именно это привело к нарушению.
+    evidence_from_adjustment: bool = False
     failure: Failure | None = None
     failure_path: str | None = None
     failure_detail: str | None = None
@@ -179,6 +183,25 @@ class Executor:
             facts=self.facts,
             related=self.related,
             excluded=self.excluded | txn_ids,
+        )
+
+    def without_adjustment(self, txn_id: str) -> Executor:
+        """Копия исполнителя, в которой правка документа по этой операции откачена.
+
+        Именно такую контрфактику требует условие задачи: улика — операция, чья
+        переклассификация, включение, исключение или исправление привела к нарушению.
+        Удаление строки отвечает на другой вопрос и для ковенантов-минимумов не
+        работает вовсе: убрав выручку, недостачу выручки не закрыть.
+        """
+        return Executor(
+            account_id=self.account_id,
+            transactions=tuple(
+                item.before if item.txn_id == txn_id and item.before is not None else item
+                for item in self.transactions
+            ),
+            facts=self.facts,
+            related=self.related,
+            excluded=self.excluded,
         )
 
     # --- отбор строк ---------------------------------------------------------
@@ -466,7 +489,12 @@ class Executor:
 
         # Округление до сравнения, а не после: эталон сверяется с числом, которое мы
         # заявили, и вердикт обязан относиться к нему же.
-        actual = quantize(measured.amount, formula.rounding.scale, formula.rounding.mode)
+        #
+        # Модуль — требование формата ответа: показатель называется величиной, а не
+        # сальдо, и списания в реестре отрицательны. Знак может появиться и внутри
+        # дерева — разностью, у которой вычитаемое больше уменьшаемого, — а вердикт
+        # обязан следовать из того же числа, которое уходит в ответ.
+        actual = quantize(abs(measured.amount), formula.rounding.scale, formula.rounding.mode)
         holds = formula.operator.holds(actual, threshold.amount)
         return Verdict(
             actual=actual,
@@ -483,8 +511,9 @@ class Executor:
         verdict = self._verdict(formula)
 
         evidence = None
+        from_adjustment = False
         if verdict.breached and formula.evidence is EvidenceMode.COUNTERFACTUAL:
-            evidence = self._evidence(formula, verdict.rows)
+            evidence, from_adjustment = self._evidence(formula, verdict.rows)
 
         return Outcome(
             scenario_id=formula.scenario_id,
@@ -498,9 +527,10 @@ class Executor:
             trigger_facts=tuple(sorted(verdict.trigger_facts)),
             diagnostics=tuple(sorted(verdict.diagnostics)),
             triggered=verdict.triggered,
+            evidence_from_adjustment=from_adjustment,
         )
 
-    def _evidence(self, formula: CovenantFormula, rows: frozenset[str]) -> str | None:
+    def _evidence(self, formula: CovenantFormula, rows: frozenset[str]) -> tuple[str | None, bool]:
         """Операция, без которой нарушения не было бы.
 
         Перебор контрфактический: строка признаётся уликой, только если её изъятие
@@ -511,33 +541,52 @@ class Executor:
         ответом остаётся `null`: угадывать здесь дешевле не станет, а неверный
         идентификатор стоит столько же, сколько пустой.
         """
+        # Сначала правки документов, и по всему реестру заёмщика, а не только по
+        # строкам расчёта: операция, выведенная документом из выручки, в строках
+        # расчёта уже не значится — именно поэтому её и надо проверить.
+        reverted = [
+            transaction.txn_id
+            for transaction in sorted(self.transactions, key=lambda t: t.txn_id)
+            if transaction.before is not None
+            and not self._still_breached(formula, self.without_adjustment(transaction.txn_id))
+        ]
+        if len(reverted) == 1:
+            return reverted[0], True
+        if reverted:
+            # Нарушение снимает не одна правка — единственной причины нет.
+            return None, False
+
         culprits = []
         for txn_id in sorted(rows):
             without = self.with_excluded(frozenset({txn_id}))
-            try:
-                # Только вердикт: вложенный поиск улики здесь ничего не добавил бы,
-                # а работу умножил бы на число строк ещё раз.
-                probe = without._verdict(formula)
-            except ExecutionError:
-                # Изъятие строки сделало расчёт невозможным — значит она не улика,
-                # а несущая конструкция расчёта.
-                continue
-            if not probe.breached:
+            if not self._still_breached(formula, without):
                 culprits.append(txn_id)
-        # Если документ изменил строку и именно после этого она стала причиной
-        # нарушения, это более сильная улика, чем прочие математически возможные
-        # контрфактики. Так аудиторская переклассификация не теряется среди крупных
-        # обычных строк знаменателя.
-        adjusted = [
+        if len(culprits) == 1:
+            return culprits[0], False
+        # Вердикт переворачивает не одна строка. Если документ трогал ровно одну из
+        # них, причина названа им: аудиторская правка сильнее прочих математически
+        # возможных контрфактик.
+        touched = [
             txn_id
             for txn_id in culprits
-            if (transaction := next((t for t in self.transactions if t.txn_id == txn_id), None))
+            if (item := next((t for t in self.transactions if t.txn_id == txn_id), None))
             is not None
-            and transaction.is_adjusted
+            and item.is_adjusted
         ]
-        if len(adjusted) == 1:
-            return adjusted[0]
-        return culprits[0] if len(culprits) == 1 else None
+        return (touched[0], False) if len(touched) == 1 else (None, False)
+
+    def _still_breached(self, formula: CovenantFormula, probe: Executor) -> bool:
+        """Осталось ли нарушение в изменённом мире.
+
+        Отказ расчёта — не снятие нарушения: строка, без которой величина не
+        считается вовсе, несущая, а не виноватая.
+        """
+        try:
+            # Только вердикт: вложенный поиск улики ничего не добавил бы, а работу
+            # умножил бы на число строк ещё раз.
+            return probe._verdict(formula).breached
+        except ExecutionError:
+            return True
 
 
 def _empty_if(rows: Sequence[object], path: str) -> frozenset[tuple[Diagnostic, str]]:
