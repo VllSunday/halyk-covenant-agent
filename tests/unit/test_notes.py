@@ -175,3 +175,56 @@ def test_disclosures_keep_their_own_reasons() -> None:
     assert [item.number for item in items] == ["7.2", "8.1"]
     assert "страхового полиса" in items[0].reason
     assert items[1].reason == ""
+
+
+def test_transaction_id_survives_extra_segments_and_cyrillic_homoglyphs() -> None:
+    """Распознавание русской страницы возвращает идентификатор кириллицей.
+
+    На вид он тот же, но в реестре по нему ничего не находится, и раскрытие про
+    эту операцию молча не доходит до расчёта.
+    """
+    item = notes.Disclosure(
+        number="9.1",
+        body=(
+            "Операция TXN-КС-МКТ-05, первоначально учтённая как Маркетинговые расходы "
+            "($20,284,662.18), переклассифицирована для целей соблюдения ковенантов "
+            "как Капитальные затраты."
+        ),
+    )
+    change = notes.reclassification(item)
+    assert change is not None
+    assert change.txn_id == "TXN-KC-MKT-05"
+
+
+def test_transaction_included_into_period() -> None:
+    item = notes.Disclosure(
+        number="4.1",
+        body=(
+            "Операция TXN-S2-0010, датированная 2026-01-05, включена в ковенантный "
+            "период 2025 года."
+        ),
+    )
+    assert notes.included_transaction(item) == "TXN-S2-0010"
+    assert notes.excluded_transaction(item) is None
+
+
+def test_bank_charge_is_added_back_to_the_converted_amount() -> None:
+    """Платёж назван за вычетом комиссии, а комиссия в пересчёт не входит.
+
+    Оставив её вычтенной, курс вберёт в себя стоимость перевода и исказит
+    пересчёт всех операций контрагента.
+    """
+    item = notes.Disclosure(
+        number="4.1",
+        body=(
+            "Settlement with Donau Metallhandel GmbH: an invoice of 57,338.50 EUR was "
+            "settled by a payment of $64,322.63, stated net of a correspondent bank "
+            "charge of $1,043.26, which does not form part of the converted amount."
+        ),
+    )
+    settlement = notes.fx_settlement(item)
+    assert settlement is not None
+    counterparty, invoiced, settled = settlement
+    assert counterparty == "Donau Metallhandel GmbH"
+    assert invoiced.to_decimal() == Decimal("57338.50")
+    assert settled.to_decimal() == Decimal("65365.89")

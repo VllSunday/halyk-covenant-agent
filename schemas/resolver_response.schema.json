@@ -5,6 +5,7 @@
         "reclassify",
         "set_missing_amount",
         "exclude",
+        "include",
         "set_effective_date",
         "convert_currency",
         "review_no_change"

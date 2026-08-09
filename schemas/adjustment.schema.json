@@ -202,6 +202,60 @@
       "title": "ExcludeAdjustment",
       "type": "object"
     },
+    "IncludeAdjustment": {
+      "description": "Операция относится к ковенантному периоду, хотя её дата лежит вне него.\n\nДата при этом не подменяется: документ говорит о принадлежности периоду, а не о\nтом, каким днём операция должна была быть проведена. Подставить сюда край периода\nзначило бы придумать день и сдвинуть операцию в квартальных выборках.",
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "include",
+          "default": "include",
+          "title": "Action",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/TransactionSelector"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "status": {
+          "$ref": "#/$defs/AdjustmentStatus",
+          "default": "pending"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "selector",
+        "reason",
+        "source"
+      ],
+      "title": "IncludeAdjustment",
+      "type": "object"
+    },
     "Money": {
       "description": "Сумма в минорных единицах вместе со своей валютой.\n\nВалюта носится с суммой, а не подразумевается снаружи: в реестре соседствуют USD\nи EUR, и сложение их без пересчёта — ошибка, которую нужно ловить типом, а не\nревью.",
       "properties": {
@@ -632,6 +686,7 @@
     "mapping": {
       "convert_currency": "#/$defs/ConvertCurrencyAdjustment",
       "exclude": "#/$defs/ExcludeAdjustment",
+      "include": "#/$defs/IncludeAdjustment",
       "reclassify": "#/$defs/ReclassifyAdjustment",
       "review_no_change": "#/$defs/ReviewNoChangeAdjustment",
       "set_effective_date": "#/$defs/SetEffectiveDateAdjustment",
@@ -648,6 +703,9 @@
     },
     {
       "$ref": "#/$defs/ExcludeAdjustment"
+    },
+    {
+      "$ref": "#/$defs/IncludeAdjustment"
     },
     {
       "$ref": "#/$defs/SetEffectiveDateAdjustment"

@@ -224,6 +224,7 @@
           "$ref": "#/$defs/Money"
         },
         "counterparty": {
+          "default": "",
           "title": "Counterparty",
           "type": "string"
         },
@@ -239,13 +240,24 @@
         },
         "source": {
           "$ref": "#/$defs/SourceRef"
+        },
+        "txn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Txn Id"
         }
       },
       "required": [
         "account_id",
         "source",
         "description",
-        "counterparty",
         "amount"
       ],
       "title": "OneOffItemFact",

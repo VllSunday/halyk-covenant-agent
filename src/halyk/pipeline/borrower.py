@@ -32,8 +32,9 @@ from halyk.knowledge.classifier import ClassificationResult
 from halyk.knowledge.facts import FactSet
 from halyk.knowledge.kyc import normalise_counterparty
 from halyk.knowledge.related_party import RelatedPartyError, RelatedPartyIndex, build_index
+from halyk.knowledge.rules import classify_by_rules
 from halyk.llm.documents import index
-from halyk.models.adjustment import Adjustment
+from halyk.models.adjustment import Adjustment, NormalisedTransaction
 from halyk.models.classification import TransactionCategory
 from halyk.models.document import DocumentFacts
 from halyk.models.fact import Fact, OneOffItemFact, RelatedPartyPolicyFact
@@ -87,7 +88,14 @@ def _one_off_rows(ledger: NormalisedLedger, facts: Sequence[Fact]) -> frozenset[
     """Проводки, которые примечания прямо называют разовыми расходами."""
     found: set[str] = set()
     for fact in facts:
-        if not isinstance(fact, OneOffItemFact) or not fact.counterparty:
+        if not isinstance(fact, OneOffItemFact):
+            continue
+        # Названную операцию искать по сумме и контрагенту незачем: раскрытие уже
+        # указало на неё идентификатором.
+        if fact.txn_id:
+            found.add(fact.txn_id)
+            continue
+        if not fact.counterparty:
             continue
         matched = [
             transaction.txn_id
@@ -101,6 +109,18 @@ def _one_off_rows(ledger: NormalisedLedger, facts: Sequence[Fact]) -> frozenset[
         if len(matched) == 1:
             found.add(matched[0])
     return frozenset(found)
+
+
+def _undocumented_category(transaction: NormalisedTransaction) -> str | None:
+    """Статья операции в прочтении без документа.
+
+    Нужна снимку «до правки»: классификатор к этому моменту уже знает решение
+    документа и повторяет его, поэтому спросить его о первоначальной статье нельзя.
+    Детерминированные правила читают только описание строки и от документа не зависят.
+    """
+    amount = transaction.row.amount.minor if transaction.row.amount is not None else None
+    match = classify_by_rules(transaction.row.description, amount)
+    return match.category.value if match is not None else None
 
 
 def with_categories(
@@ -120,6 +140,19 @@ def with_categories(
         if record.final_category.is_decided
     }
     documented_one_offs = _one_off_rows(ledger, facts)
+
+    def restored(transaction: NormalisedTransaction) -> NormalisedTransaction:
+        """Снимок «до правки» со статьёй, прочитанной без участия документа."""
+        if transaction.before is None:
+            return transaction
+        return transaction.model_copy(
+            update={
+                "before": transaction.before.model_copy(
+                    update={"covenant_category": _undocumented_category(transaction)}
+                )
+            }
+        )
+
     transactions = tuple(
         transaction.model_copy(
             update={
@@ -136,7 +169,7 @@ def with_categories(
             if transaction.txn_id in documented_one_offs and not transaction.is_adjusted
             else transaction
         )
-        for transaction in ledger.transactions
+        for transaction in map(restored, ledger.transactions)
     )
     return replace(ledger, transactions=transactions)
 

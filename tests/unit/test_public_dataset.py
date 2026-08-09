@@ -290,7 +290,10 @@ def test_external_facts_are_extracted_with_provenance(facts: FactSet) -> None:
     """Разовые статьи, покрытие и обязательство — входы формулы, а не проводки."""
     kinds = collections.Counter(f.kind for f in facts.facts)
     assert kinds[FactKind.ONE_OFF_ITEM] == 3
-    assert kinds[FactKind.ONE_OFF_POLICY] == 1
+    # Порог существенности объявляет и договор, поэтому он есть у каждого заёмщика.
+    # Там, где его называют и примечания, действует их значение — см. P4 ниже.
+    assert kinds[FactKind.ONE_OFF_POLICY] == 12
+    assert len({f.account_id for f in facts.facts if f.kind is FactKind.ONE_OFF_POLICY}) == 12
     assert kinds[FactKind.COLLATERAL_COVERAGE] == 1
     assert kinds[FactKind.AGGREGATE_OBLIGATION] == 1
     assert kinds[FactKind.FX_SETTLEMENT] == 1

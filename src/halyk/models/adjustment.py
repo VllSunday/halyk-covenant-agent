@@ -30,6 +30,7 @@ class AdjustmentAction(StrEnum):
     RECLASSIFY = "reclassify"
     SET_MISSING_AMOUNT = "set_missing_amount"
     EXCLUDE = "exclude"
+    INCLUDE = "include"
     SET_EFFECTIVE_DATE = "set_effective_date"
     CONVERT_CURRENCY = "convert_currency"
     REVIEW_NO_CHANGE = "review_no_change"
@@ -193,6 +194,22 @@ class ExcludeAdjustment(AdjustmentBase):
         return {"in_period": False}
 
 
+class IncludeAdjustment(AdjustmentBase):
+    """Операция относится к ковенантному периоду, хотя её дата лежит вне него.
+
+    Дата при этом не подменяется: документ говорит о принадлежности периоду, а не о
+    том, каким днём операция должна была быть проведена. Подставить сюда край периода
+    значило бы придумать день и сдвинуть операцию в квартальных выборках.
+    """
+
+    action: Literal[AdjustmentAction.INCLUDE] = AdjustmentAction.INCLUDE
+
+    changed_fields: ClassVar[frozenset[str]] = frozenset({"in_period"})
+
+    def effect(self) -> dict[str, Any]:
+        return {"in_period": True}
+
+
 class SetEffectiveDateAdjustment(AdjustmentBase):
     """Период определяется датой оказания услуг, а не датой счёта-фактуры."""
 
@@ -266,6 +283,7 @@ Adjustment = Annotated[
     ReclassifyAdjustment
     | SetMissingAmountAdjustment
     | ExcludeAdjustment
+    | IncludeAdjustment
     | SetEffectiveDateAdjustment
     | ConvertCurrencyAdjustment
     | ReviewNoChangeAdjustment,
@@ -291,6 +309,12 @@ class NormalisedTransaction(BaseModel):
     covenant_category: str | None = None
     excluded: bool = False
     adjustments: tuple[str, ...] = ()
+    # Состояние операции до первой применённой корректировки. Нужно для выбора улики:
+    # по условию задачи ею считается операция, чья правка документом и приводит к
+    # нарушению, а проверить это можно только откатив правку. Восстанавливать состояние
+    # заново нельзя — часть его (статья, назначенная классификатором) к тому моменту
+    # уже не выводится из исходной строки.
+    before: NormalisedTransaction | None = None
 
     @property
     def txn_id(self) -> str:
@@ -306,9 +330,10 @@ class NormalisedTransaction(BaseModel):
         `excluded` сюда не входит: это служебная отметка, из которой вычисляется
         `in_period`. Операция, и без документа не попавшая в период, от исключения
         не меняется — и корректировка должна об этом сообщить, а не отчитаться
-        об успехе.
+        об успехе. `before` — происхождение, а не значение: сам факт снимка не
+        делает корректировку подействовавшей.
         """
-        return self.model_dump(mode="json", exclude={"row", "adjustments", "excluded"})
+        return self.model_dump(mode="json", exclude={"row", "adjustments", "excluded", "before"})
 
     def record(self) -> dict[str, Any]:
         return self.model_dump(mode="json")

@@ -130,7 +130,11 @@ class OneOffItemFact(FactBase):
 
     kind: Literal[FactKind.ONE_OFF_ITEM] = FactKind.ONE_OFF_ITEM
     description: str
-    counterparty: str
+    # Статью называют двумя способами: строкой таблицы с контрагентом либо пунктом
+    # раскрытия с идентификатором операции. Пустым остаётся ровно один из них, и по
+    # тому, какой именно, видно, чем статья привязана к реестру.
+    counterparty: str = ""
+    txn_id: str | None = None
     amount: Money
 
 

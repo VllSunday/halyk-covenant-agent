@@ -24,6 +24,7 @@ from halyk.models.adjustment import (
     AdjustmentStatus,
     ConvertCurrencyAdjustment,
     ExcludeAdjustment,
+    IncludeAdjustment,
     NormalisedTransaction,
     ReclassifyAdjustment,
     SetEffectiveDateAdjustment,
@@ -96,7 +97,12 @@ def _matches(row: LedgerRow, adjustment: Adjustment) -> bool:
 def _apply(
     transaction: NormalisedTransaction, adjustment: Adjustment, period: CovenantPeriod
 ) -> NormalisedTransaction:
-    update: dict[str, object] = {"adjustments": (*transaction.adjustments, adjustment.id)}
+    update: dict[str, object] = {
+        "adjustments": (*transaction.adjustments, adjustment.id),
+        # Запоминаем состояние до первой правки: последующие откатываются к нему же,
+        # потому что улика — это операция целиком, а не отдельная корректировка.
+        "before": transaction.before or transaction,
+    }
     match adjustment:
         case ReclassifyAdjustment():
             update["covenant_category"] = adjustment.new_value
@@ -108,6 +114,10 @@ def _apply(
         case ExcludeAdjustment():
             update["excluded"] = True
             update["in_period"] = False
+        case IncludeAdjustment():
+            # Исключение сильнее включения: если операцию уже вывели из расчёта, она
+            # остаётся вне его независимо от порядка применения документов.
+            update["in_period"] = not transaction.excluded
         case SetEffectiveDateAdjustment():
             # `excluded` держится отдельно, чтобы порядок исключения и переноса даты
             # не решал исход: исключённая операция остаётся вне периода в любом.

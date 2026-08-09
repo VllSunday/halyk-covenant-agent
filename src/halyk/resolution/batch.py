@@ -36,6 +36,7 @@ from halyk.models.adjustment import (
     AdjustmentStatus,
     ConvertCurrencyAdjustment,
     ExcludeAdjustment,
+    IncludeAdjustment,
     ReclassifyAdjustment,
     ReviewNoChangeAdjustment,
     SetEffectiveDateAdjustment,
@@ -218,7 +219,7 @@ def _required[T](value: T | None, field: str) -> T:
     return value
 
 
-def _adjustment(
+def _adjustment(  # noqa: PLR0911 — по возврату на действие, и это весь их список
     proposal: ProposedAdjustment, account_id: str, documents: dict[str, DocumentFacts]
 ) -> Adjustment:
     """Настоящая корректировка из предложенной. Обязательные поля задаёт действие."""
@@ -243,6 +244,8 @@ def _adjustment(
             return SetMissingAmountAdjustment(amount=_money(proposal), status=status, **common)
         case AdjustmentAction.EXCLUDE:
             return ExcludeAdjustment(status=status, **common)
+        case AdjustmentAction.INCLUDE:
+            return IncludeAdjustment(status=status, **common)
         case AdjustmentAction.SET_EFFECTIVE_DATE:
             return SetEffectiveDateAdjustment(
                 effective_date=_required(proposal.effective_date, "effective_date"),

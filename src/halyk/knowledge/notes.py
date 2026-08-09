@@ -31,7 +31,24 @@ _FOOTER = re.compile(
 )
 
 _AMOUNT = r"\$\s?[\d][\d,]*(?:\.\d{2})?"
-_TXN = r"TXN-[A-Z0-9]+-\d+"
+# Идентификатор операции состоит из произвольного числа сегментов: `TXN-S2-0010` в
+# одних наборах и `TXN-KC-CAP-16` в других. Жёсткие два сегмента означали бы, что
+# раскрытие про такую операцию молча не разобрано.
+#
+# Кириллица в наборе символов не по недосмотру. Распознавание русскоязычной страницы
+# возвращает `TXN-КС-МКТ-05` кириллическими буквами: на вид они неотличимы от
+# латинских, и по такому идентификатору в реестре не находится ничего. Принимаем оба
+# начертания, а наружу отдаём приведённое к латинице — `canonical_txn`.
+_HOMOGLYPHS = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")
+_TXN_LETTER = "A-Z0-9АВЕКМНОРСТУХ"
+_TXN = rf"TXN-[{_TXN_LETTER}]+(?:-[{_TXN_LETTER}]+)+"
+
+
+def canonical_txn(raw: str) -> str:
+    """Идентификатор операции в том начертании, в каком он записан в реестре."""
+    return raw.translate(_HOMOGLYPHS)
+
+
 # Дата в раскрытиях приходит в ISO, но англоязычный документ может написать её
 # прописью. Оба начертания разбираются одной функцией, чтобы дальше по коду разницы
 # не было.
@@ -79,7 +96,8 @@ _BY_TXN = (
     ),
     re.compile(
         rf"Transaction (?P<txn_id>{_TXN}), originally recorded as (?P<old>.+?) "
-        rf"\((?P<amount>{_AMOUNT})\), (?:has been |was )?reclassified for covenant "
+        rf"\((?P<amount>{_AMOUNT})\), (?:has been |was )?"
+        r"(?:reclassified|re-?characteri[sz]ed) for covenant(?:-compliance)? "
         r"purposes as (?P<new>.+?)\."
     ),
 )
@@ -127,6 +145,25 @@ _EXCLUDED = (
         r"is excluded from the covenant period"
     ),
 )
+# Обратное исключению: операция датирована вне периода, но документ относит её к
+# нему. Дата в раскрытии называется как исходная, а не как новая, поэтому подставлять
+# её в качестве даты признания нельзя.
+_INCLUDED = (
+    re.compile(
+        rf"Операция (?P<txn_id>{_TXN}), датированная (?P<date>{_DATE}), "
+        r"включена в ковенантный период"
+    ),
+    re.compile(
+        rf"Transaction (?P<txn_id>{_TXN}), dated (?P<date>{_DATE}), "
+        r"is included in the covenant period"
+    ),
+)
+# Разовая статья, названная не строкой таблицы, а самим пунктом раскрытия: у неё есть
+# идентификатор операции и нет контрагента.
+_ONE_OFF_TXN = (
+    re.compile(rf"Операция (?P<txn_id>{_TXN}) \((?P<amount>{_AMOUNT})\) является разовой статьёй"),
+    re.compile(rf"Transaction (?P<txn_id>{_TXN}) \((?P<amount>{_AMOUNT})\) is a one-off item"),
+)
 _RENDERED_IN = (
     re.compile(
         rf"Операция (?P<txn_id>{_TXN}) \(счёт-фактура от (?P<invoiced>{_DATE})\) "
@@ -141,9 +178,20 @@ _OBLIGATION = (
     re.compile(
         rf"совокупное обязательство по (?P<description>.+?) в размере (?P<amount>{_AMOUNT})"
     ),
+    # Та же величина объявляется и от обратного: не «есть обязательство», а «раскрыто
+    # и отдельной проводки не имеет». Смысл для расчёта один — сумма есть только в
+    # документе, и в реестре её искать бесполезно.
+    re.compile(
+        r"Для целей агрегирования по ковенантам (?P<description>.+?) в размере "
+        rf"(?P<amount>{_AMOUNT}) раскрывается и не отражается отдельной операцией"
+    ),
     re.compile(
         rf"(?:an )?aggregate obligation (?:in respect of |for |under )(?P<description>.+?) "
         rf"of (?P<amount>{_AMOUNT})"
+    ),
+    re.compile(
+        r"[Ff]or covenant aggregation purposes,? (?P<description>.+?) of "
+        rf"(?P<amount>{_AMOUNT}) is disclosed and is not reflected as a separate"
     ),
 )
 _FX_SETTLEMENT = (
@@ -153,19 +201,38 @@ _FX_SETTLEMENT = (
         rf"в долларах США в размере (?P<settled>{_AMOUNT})"
     ),
     re.compile(
-        r"Settlements with (?:counterparty )?[«\"](?P<counterparty>.+?)[»\"]: an invoice of "
-        r"(?P<invoiced>[\d,]+\.\d{2})\s*(?P<currency>EUR|KZT|USD) was settled by a payment "
-        rf"in US dollars of (?P<settled>{_AMOUNT})"
+        r"Settlements? with (?:counterparty )?[«\"']?(?P<counterparty>[^»\"'\n:]+?)[»\"']?: "
+        r"an invoice of (?P<invoiced>[\d,]+\.\d{2})\s*(?P<currency>EUR|KZT|USD) was settled "
+        rf"by a payment (?:in US dollars )?of (?P<settled>{_AMOUNT})"
+    ),
+)
+# Комиссия банка-корреспондента, вычтенная из платежа. Платёж назван «стоящим за
+# вычетом» её, а сама комиссия объявлена не входящей в пересчитанную сумму, — значит
+# курс восстанавливается по платежу вместе с ней, иначе он вберёт в себя стоимость
+# перевода и исказит пересчёт всех операций этого контрагента.
+_SETTLEMENT_CHARGE = (
+    re.compile(
+        rf"за вычетом комиссии банка-корреспондента в размере (?P<charge>{_AMOUNT})"
+        r"[^.]*?не (?:входит|включается) в пересчитанную сумму"
+    ),
+    re.compile(
+        rf"stated net of a correspondent bank charge of (?P<charge>{_AMOUNT})"
+        r"[^.]*?does not form part of the converted amount"
     ),
 )
 _ONE_OFF_POLICY = (
     re.compile(
         rf"Разовыми для целей ковенантов признаются статьи в сумме не менее (?P<amount>{_AMOUNT})"
     ),
+    # Порог объявляет и сам договор — там он вписан в определение статьи, а не вынесен
+    # отдельным правилом: «Разовые расходы, не связанные с основной деятельностью и
+    # превышающие $650,000». Без него исполнитель отказывается считать EBITDA.
+    re.compile(rf"[Рр]азовые расходы[^.]{{0,120}}превышающие (?P<amount>{_AMOUNT})"),
     re.compile(
         r"[Ii]tems of (?:not less than|at least) (?P<amount>"
         rf"{_AMOUNT}) are treated as one-off for covenant purposes"
     ),
+    re.compile(rf"[Oo]ne-off (?:costs|items|expenses)[^.]{{0,120}}exceeding (?P<amount>{_AMOUNT})"),
 )
 # Направление в русском и английском написано по-разному, а знак суммы от него зависит.
 _OUTFLOW_WORDS = frozenset({"расход", "outflow", "expense"})
@@ -281,7 +348,10 @@ def fx_settlement(item: Disclosure) -> tuple[str, Money, Money] | None:
     if match is None:
         return None
     invoiced = parse_money(match.group("invoiced"), Currency(match.group("currency")))
-    return match.group("counterparty").strip(), invoiced, _money(match.group("settled"))
+    settled = _money(match.group("settled"))
+    if (charge := _first(_SETTLEMENT_CHARGE, item.body)) is not None:
+        settled = settled + _money(charge.group("charge"))
+    return match.group("counterparty").strip(), invoiced, settled
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,7 +373,7 @@ def reclassification(item: Disclosure) -> Reclassification | None:
             old_value=match.group("old").strip(),
             new_value=match.group("new").strip(),
             amount=_money(match.group("amount")),
-            txn_id=match.group("txn_id"),
+            txn_id=canonical_txn(match.group("txn_id")),
             accepted=False,
         )
     if (match := _first(_BY_TXN, item.body)) is not None:
@@ -311,7 +381,7 @@ def reclassification(item: Disclosure) -> Reclassification | None:
             old_value=match.group("old").strip(),
             new_value=match.group("new").strip(),
             amount=_money(match.group("amount")),
-            txn_id=match.group("txn_id"),
+            txn_id=canonical_txn(match.group("txn_id")),
         )
     if (match := _first(_BY_AMOUNT, item.body)) is not None:
         return Reclassification(
@@ -325,7 +395,7 @@ def reclassification(item: Disclosure) -> Reclassification | None:
             old_value="",
             new_value=None,
             amount=_money(match.group("amount")),
-            txn_id=match.group("txn_id"),
+            txn_id=canonical_txn(match.group("txn_id")),
             counterparty=match.group("counterparty").strip(),
             accepted=False,
         )
@@ -339,12 +409,26 @@ def missing_amount(item: Disclosure) -> tuple[str, Money] | None:
         return None
     amount = _money(match.group("amount"))
     outflow = match.group("direction").lower() in _OUTFLOW_WORDS
-    return match.group("txn_id"), -amount if outflow else amount
+    return canonical_txn(match.group("txn_id")), -amount if outflow else amount
 
 
 def excluded_transaction(item: Disclosure) -> str | None:
     match = _first(_EXCLUDED, item.body)
-    return match.group("txn_id") if match else None
+    return canonical_txn(match.group("txn_id")) if match else None
+
+
+def included_transaction(item: Disclosure) -> str | None:
+    """Операция, отнесённая к периоду вопреки собственной дате."""
+    match = _first(_INCLUDED, item.body)
+    return canonical_txn(match.group("txn_id")) if match else None
+
+
+def one_off_transaction(item: Disclosure) -> tuple[str, Money] | None:
+    """Разовая статья, названная пунктом раскрытия через идентификатор операции."""
+    match = _first(_ONE_OFF_TXN, item.body)
+    if match is None:
+        return None
+    return canonical_txn(match.group("txn_id")), _money(match.group("amount"))
 
 
 def effective_period(item: Disclosure) -> tuple[str, date] | None:
@@ -352,7 +436,7 @@ def effective_period(item: Disclosure) -> tuple[str, date] | None:
     match = _first(_RENDERED_IN, item.body)
     if match is None:
         return None
-    return match.group("txn_id"), parse_date(match.group("start"))
+    return canonical_txn(match.group("txn_id")), parse_date(match.group("start"))
 
 
 def is_actionable(item: Disclosure) -> bool:
@@ -373,6 +457,8 @@ def is_recognised(item: Disclosure) -> bool:
             reclassification(item) is not None,
             missing_amount(item) is not None,
             excluded_transaction(item) is not None,
+            included_transaction(item) is not None,
+            one_off_transaction(item) is not None,
             effective_period(item) is not None,
             aggregate_obligation(item) is not None,
             fx_settlement(item) is not None,

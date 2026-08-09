@@ -21,6 +21,7 @@ from halyk.models.adjustment import (
     AdjustmentStatus,
     ConvertCurrencyAdjustment,
     ExcludeAdjustment,
+    IncludeAdjustment,
     ReclassifyAdjustment,
     ReviewNoChangeAdjustment,
     SetEffectiveDateAdjustment,
@@ -142,6 +143,20 @@ def _page_facts(
                 account_id=account_id, source=source, description=description, amount=amount
             )
         )
+    if (one_off := notes.one_off_transaction(item)) is not None:
+        txn_id, amount = one_off
+        # Основание пункта идёт описанием: по нему разовая статья отличается от
+        # соседних, а идентификатор операции сам по себе ничего не говорит о том,
+        # за что она.
+        found.append(
+            OneOffItemFact(
+                account_id=account_id,
+                source=source,
+                description=item.reason or f"разовая статья по операции {txn_id}",
+                amount=amount,
+                txn_id=txn_id,
+            )
+        )
     if (settlement := notes.fx_settlement(item)) is not None:
         counterparty, invoiced, settled = settlement
         found.append(
@@ -212,6 +227,14 @@ def _page_adjustments(
         found.append(
             ExcludeAdjustment(
                 selector=TransactionSelector(txn_id=excluded),
+                status=status,
+                **common,
+            )
+        )
+    if (included := notes.included_transaction(item)) is not None:
+        found.append(
+            IncludeAdjustment(
+                selector=TransactionSelector(txn_id=included),
                 status=status,
                 **common,
             )
@@ -303,6 +326,25 @@ def _ppe_facts(document: DocumentFacts, authority: SourceAuthority) -> list[Fact
     ]
 
 
+def _agreement_facts(document: DocumentFacts, authority: SourceAuthority) -> list[Fact]:
+    """Что берётся из самого договора.
+
+    Только порог существенности разовых статей: он часть определения показателя, а не
+    раскрытие. Корректировки реестра договор не порождает — их делают примечания и
+    отчёты аудитора, и смешивать эти роли нельзя.
+    """
+    for page in document.pages:
+        if (minimum := notes.one_off_minimum(page.text)) is not None:
+            return [
+                OneOffPolicyFact(
+                    account_id=document.account_id or "",
+                    source=_source(document, page, authority),
+                    minimum=minimum,
+                )
+            ]
+    return []
+
+
 def build_facts(inventory: DatasetInventory) -> FactSet:
     """Прочитать все значимые документы и собрать факты с корректировками."""
     superseded = superseded_drafts(inventory.documents)
@@ -310,6 +352,7 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
     adjustments: list[Adjustment] = []
     unparsed_dossiers: list[str] = []
     unparsed: list[str] = []
+    from_agreement: list[Fact] = []
 
     ordered = sorted(inventory.relevant, key=lambda doc: (doc.account_id or "", doc.file_name))
     for document in ordered:
@@ -330,6 +373,12 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
             facts.extend(_ppe_facts(document, authority))
             continue
 
+        if document.kind is DocumentKind.LOAN_AGREEMENT:
+            # Договор откладывается: его порог — запасной. Где примечания объявили свой,
+            # действует он, и значения расходятся не по ошибке, а по замыслу набора.
+            from_agreement.extend(_agreement_facts(document, authority))
+            continue
+
         if document.kind not in _DISCLOSURE_KINDS:
             continue
 
@@ -345,6 +394,10 @@ def build_facts(inventory: DatasetInventory) -> FactSet:
                 adjustments.extend(_page_adjustments(document, page, authority, item, status))
                 if notes.is_actionable(item) and not notes.is_recognised(item):
                     unparsed.append(f"{document.file_name}#{item.number}")
+
+    # Порог из договора добирается только там, где раскрытия своего не назвали.
+    declared = {fact.account_id for fact in facts if isinstance(fact, OneOffPolicyFact)}
+    facts.extend(fact for fact in from_agreement if fact.account_id not in declared)
 
     adjustments.extend(_fx_adjustments(facts))
     return FactSet(

@@ -72,65 +72,79 @@
       ],
       "title": "Money",
       "type": "object"
-    }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Операция в том виде, в котором её увидит расчёт.\n\nРядом лежит исходная строка: сравнение «было — стало» не требует второго\nисточника, а список применённых корректировок объясняет каждое расхождение.",
-  "properties": {
-    "adjustments": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Adjustments",
-      "type": "array"
     },
-    "amount": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Money"
+    "NormalisedTransaction": {
+      "description": "Операция в том виде, в котором её увидит расчёт.\n\nРядом лежит исходная строка: сравнение «было — стало» не требует второго\nисточника, а список применённых корректировок объясняет каждое расхождение.",
+      "properties": {
+        "adjustments": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Adjustments",
+          "type": "array"
         },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "covenant_category": {
-      "anyOf": [
-        {
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalisedTransaction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "covenant_category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Covenant Category"
+        },
+        "effective_date": {
+          "format": "date",
+          "title": "Effective Date",
           "type": "string"
         },
-        {
-          "type": "null"
+        "excluded": {
+          "default": false,
+          "title": "Excluded",
+          "type": "boolean"
+        },
+        "in_period": {
+          "default": true,
+          "title": "In Period",
+          "type": "boolean"
+        },
+        "row": {
+          "$ref": "#/$defs/LedgerRow"
         }
+      },
+      "required": [
+        "row",
+        "amount",
+        "effective_date"
       ],
-      "default": null,
-      "title": "Covenant Category"
-    },
-    "effective_date": {
-      "format": "date",
-      "title": "Effective Date",
-      "type": "string"
-    },
-    "excluded": {
-      "default": false,
-      "title": "Excluded",
-      "type": "boolean"
-    },
-    "in_period": {
-      "default": true,
-      "title": "In Period",
-      "type": "boolean"
-    },
-    "row": {
-      "$ref": "#/$defs/LedgerRow"
+      "title": "NormalisedTransaction",
+      "type": "object"
     }
   },
-  "required": [
-    "row",
-    "amount",
-    "effective_date"
-  ],
-  "title": "NormalisedTransaction",
-  "type": "object"
+  "$ref": "#/$defs/NormalisedTransaction",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }
