@@ -119,8 +119,10 @@ def test_resolver_is_asked_only_where_something_is_missing(
 ) -> None:
     """У первого заёмщика все требования закрыл разбор документов — спрашивать нечего."""
     _, _, engines = completed
-    assert engines.compiler.runner.send.accounts == ["ACC-4001", "ACC-4002"]  # type: ignore[attr-defined]
-    assert engines.resolver.runner.send.accounts == ["ACC-4002"]  # type: ignore[attr-defined]
+    # Сравниваем состав, а не порядок: заёмщики считаются параллельно, и очерёдность
+    # обращений задаёт планировщик потоков, а не пайплайн.
+    assert sorted(engines.compiler.runner.send.accounts) == ["ACC-4001", "ACC-4002"]  # type: ignore[attr-defined]
+    assert sorted(engines.resolver.runner.send.accounts) == ["ACC-4002"]  # type: ignore[attr-defined]
 
 
 def test_batches_are_one_per_borrower(

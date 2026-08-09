@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from halyk.config import Settings
 from halyk.execution.executor import Outcome
 from halyk.models.result import Verdict
-from halyk.models.submission import CovenantCell, Submission
+from halyk.models.submission import CovenantCell, EmptyCell, Submission
 from halyk.output.template import SubmissionTemplate
 
 
@@ -47,20 +47,30 @@ def build_submission(
     template: SubmissionTemplate,
     settings: Settings,
     answers: Mapping[tuple[str, str], Outcome],
+    *,
+    partial: bool = False,
 ) -> Submission:
-    """Ответ по шаблону. Порядок ячеек — шаблонный, чтобы файл был воспроизводим."""
+    """Ответ по шаблону. Порядок ячеек — шаблонный, чтобы файл был воспроизводим.
+
+    С `partial` непосчитанная ячейка выходит пустой вместо отказа собрать файл.
+    Решение осознанное и принимается снаружи: цена ему — ноль баллов за такую
+    ячейку, и молча принимать её нельзя.
+    """
     expected = template.key_set()
     missing = sorted(expected - set(answers))
     extra = sorted(set(answers) - expected)
-    if missing or extra:
+    if extra or (missing and not partial):
         raise CompositionError(
             "состав ячеек не совпал с шаблоном: "
             f"нет {[f'{s}/{c}' for s, c in missing]}, лишние {[f'{s}/{c}' for s, c in extra]}"
         )
 
-    grouped: dict[str, dict[str, CovenantCell]] = {}
+    grouped: dict[str, dict[str, CovenantCell | EmptyCell]] = {}
     for scenario, clause in template.cells:
-        grouped.setdefault(scenario, {})[clause] = to_cell(answers[scenario, clause])
+        outcome = answers.get((scenario, clause))
+        grouped.setdefault(scenario, {})[clause] = (
+            to_cell(outcome) if outcome is not None else EmptyCell()
+        )
 
     return Submission(
         team=settings.team,

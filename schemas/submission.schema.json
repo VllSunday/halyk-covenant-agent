@@ -32,6 +32,29 @@
       "title": "CovenantCell",
       "type": "object"
     },
+    "EmptyCell": {
+      "additionalProperties": false,
+      "description": "Ячейка, которую прогон не посчитал.\n\nСуществует только ради `--partial`: шаблон организаторов допускает `null`, и в\nбоевом окне лучше сдать посчитанное, чем не сдать ничего. Ноль баллов такая\nячейка приносит в любом случае — и пустой, и отсутствующей, — но остальные при\nэтом перестают пропадать вместе с ней.",
+      "properties": {
+        "actual": {
+          "default": null,
+          "title": "Actual",
+          "type": "null"
+        },
+        "evidence_txn_id": {
+          "default": null,
+          "title": "Evidence Txn Id",
+          "type": "null"
+        },
+        "status": {
+          "default": null,
+          "title": "Status",
+          "type": "null"
+        }
+      },
+      "title": "EmptyCell",
+      "type": "object"
+    },
     "Verdict": {
       "description": "Значения ровно те, что принимает ключ: любой иной регистр обнуляет ячейку.",
       "enum": [
@@ -49,7 +72,14 @@
     "answers": {
       "additionalProperties": {
         "additionalProperties": {
-          "$ref": "#/$defs/CovenantCell"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CovenantCell"
+            },
+            {
+              "$ref": "#/$defs/EmptyCell"
+            }
+          ]
         },
         "type": "object"
       },

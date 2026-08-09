@@ -51,6 +51,22 @@ class CovenantCell(BaseModel):
     evidence_txn_id: str | None
 
 
+class EmptyCell(BaseModel):
+    """Ячейка, которую прогон не посчитал.
+
+    Существует только ради `--partial`: шаблон организаторов допускает `null`, и в
+    боевом окне лучше сдать посчитанное, чем не сдать ничего. Ноль баллов такая
+    ячейка приносит в любом случае — и пустой, и отсутствующей, — но остальные при
+    этом перестают пропадать вместе с ней.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: None = None
+    actual: None = None
+    evidence_txn_id: None = None
+
+
 class Submission(BaseModel):
     """Файл ответа целиком.
 
@@ -66,7 +82,7 @@ class Submission(BaseModel):
     team: str
     contact_email: str
     model: str
-    answers: dict[str, dict[str, CovenantCell]]
+    answers: dict[str, dict[str, CovenantCell | EmptyCell]]
 
     def cell_keys(self) -> set[tuple[str, str]]:
         return {

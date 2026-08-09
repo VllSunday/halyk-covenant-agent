@@ -135,6 +135,13 @@ def solve(
             help="Считать только по кэшу: сетевой клиент не создаётся, промах — ошибка",
         ),
     ] = False,
+    partial: Annotated[
+        bool,
+        typer.Option(
+            "--partial",
+            help="Записать ответ с пустыми ячейками там, где расчёт не сошёлся",
+        ),
+    ] = False,
 ) -> None:
     """Полный прогон от архива до Submission.json.
 
@@ -163,7 +170,9 @@ def solve(
         console.print("[yellow]Кэш не читается: все ответы будут запрошены заново[/yellow]")
 
     try:
-        result = run_pipeline(context, input_path, output_path, template_path=template)
+        result = run_pipeline(
+            context, input_path, output_path, template_path=template, partial=partial
+        )
     except DatasetError as exc:
         error_console.print(str(exc))
         raise typer.Exit(code=2) from exc
@@ -172,6 +181,14 @@ def solve(
         if exc.report is not None:
             for line in first_lines(exc.report.problems):
                 error_console.print(f"  {line}")
+        if partial and output_path.exists():
+            # Файл записан, но прогон всё равно упал: ячейки в нём есть не все.
+            # Код возврата остаётся ненулевым — иначе неполный ответ читался бы как
+            # обычный результат.
+            error_console.print(
+                f"\n--partial: {output_path} записан с пустыми ячейками. "
+                f"Пустая ячейка стоит нуля баллов — сверьтесь с report.json перед сдачей."
+            )
         raise typer.Exit(code=1) from exc
 
     metrics = result.metrics

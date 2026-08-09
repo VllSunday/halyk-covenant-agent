@@ -371,8 +371,13 @@ def solve(
     *,
     template_path: Path | None = None,
     engines: Engines | None = None,
+    partial: bool = False,
 ) -> SolveResult:
-    """Сквозной прогон. Бросает `PipelineError`, если ответ собрался не полностью."""
+    """Сквозной прогон. Бросает `PipelineError`, если ответ собрался не полностью.
+
+    `partial` не отменяет отказ: прогон остаётся упавшим, а файл ответа всё же
+    пишется — с пустыми ячейками там, где расчёт не сошёлся.
+    """
     started = time.perf_counter()
     _require_header(context)
 
@@ -439,9 +444,15 @@ def solve(
         last_known_good=keeper.status(context.settings),
     )
 
+    # `partial` пишет ответ и при неполном составе. Прогон при этом остаётся упавшим:
+    # код возврата, статус и отчёт говорят то же, что и раньше, — иначе пустые ячейки
+    # незаметно превратились бы в обычный результат.
+    writable = report.is_clean or (partial and bool(answers))
     document = (
-        build_submission(template, context.settings, answers).model_dump_json(indent=2)
-        if report.is_clean
+        build_submission(
+            template, context.settings, answers, partial=not report.is_clean
+        ).model_dump_json(indent=2)
+        if writable
         else ""
     )
     submission_sha: str | None = None

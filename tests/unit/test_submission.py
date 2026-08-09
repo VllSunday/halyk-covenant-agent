@@ -98,9 +98,9 @@ def test_serialisation_schema_keeps_the_lower_bound() -> None:
         "model": "m",
         "answers": {"P1": {"6.1": {"status": "BREACH", "actual": -1.0, "evidence_txn_id": None}}},
     }
-    assert [issue.location for issue in validate_document(document, schema)] == [
-        "answers/P1/6.1/actual"
-    ]
+    # Ячейка описана объединением «посчитанная или пустая», поэтому адрес нарушения
+    # указывает на неё целиком: отрицательное число не подходит ни под один вариант.
+    assert [issue.location for issue in validate_document(document, schema)] == ["answers/P1/6.1"]
 
 
 def test_serialisation_schema_requires_all_three_components() -> None:
