@@ -137,3 +137,54 @@ def test_normalisation_keeps_different_companies_apart() -> None:
     assert normalise_counterparty("Shymkent Refinery JSC") != normalise_counterparty(
         "Shymkent Refinery Services JSC"
     )
+
+
+def test_threshold_declared_in_words() -> None:
+    """Порог называют и числом, и прописью — это одно и то же правило."""
+    text = (
+        "Организация\nДоля голосующих прав\n"
+        "Syrdarya Capital L.L.P.\n32.1%\nTurkestan Rail Operations LLP\n24.6%\n"
+        "Организации, в которых Группе принадлежит не менее одной четверти "
+        "голосующих прав, признаются связанными сторонами для целей Договора."
+    )
+    policy = parse_related_party_policy(text)
+    assert policy.threshold == Decimal("0.25")
+    assert policy.related_parties == ("Syrdarya Capital L.L.P.",)
+
+
+def test_dossier_without_table_names_related_party_directly() -> None:
+    text = (
+        "Запись 1. Контрагент «Altyn Capital L.L.P.» классифицирован как "
+        "АФФИЛИРОВАННОЕ ЛИЦО Заёмщика. Платежи данному контрагенту признаются "
+        "Ограниченными платежами для целей ковенантов."
+    )
+    assert parse_related_party_policy(text).related_parties == ("Altyn Capital L.L.P.",)
+
+
+def test_designated_subsidiary_is_listed_but_not_related() -> None:
+    """Дочерняя внутри периметра — структура группы, а не связанная сторона.
+
+    В индекс она всё равно попадает: иначе её название читается как незнакомое и
+    похожее написание в реестре поднимет ложную тревогу.
+    """
+    text = (
+        '**Entry 1.** Counterparty "Oskemen Rolling Mill LLP" is a designated '
+        "RESTRICTED SUBSIDIARY of the Borrower.\n"
+        '**Entry 2.** Counterparty "Altai Ore Processing LLP" is a designated '
+        "UNRESTRICTED SUBSIDIARY of the Borrower."
+    )
+    policy = parse_related_party_policy(text)
+    assert policy.related_parties == ()
+    assert [name for name, _ in policy.holdings] == [
+        "Oskemen Rolling Mill LLP",
+        "Altai Ore Processing LLP",
+    ]
+
+
+def test_dossier_may_declare_that_there_are_none() -> None:
+    """«Не выявлены» — прочитанный ответ, а не пустой разбор."""
+    text = (
+        "Проверка связанных сторон · Aktobe Cement JSC\n"
+        "Связанные стороны среди контрагентов не выявлены."
+    )
+    assert parse_related_party_policy(text).related_parties == ()

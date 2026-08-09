@@ -17,6 +17,53 @@ _THRESHOLD = re.compile(
     r"|holds\s+(?P<share_en>\d+(?:[.,]\d+)?)\s*%\s+or\s+more",
     re.IGNORECASE,
 )
+# Порог называют и числом, и словами: «не менее одной четверти голосующих прав».
+# Доли перечислены закрытым списком — придумывать разбор числительных ради значений,
+# которых в документах нет, значит написать код, который нечем проверить.
+_FRACTIONS: dict[str, Decimal] = {
+    "одной десятой": Decimal("0.1"),
+    "одной пятой": Decimal("0.2"),
+    "одной четверти": Decimal("0.25"),
+    "трёх десятых": Decimal("0.3"),
+    "трех десятых": Decimal("0.3"),
+    "одной трети": Decimal(1) / Decimal(3),
+    "двух пятых": Decimal("0.4"),
+    "половины": Decimal("0.5"),
+    "one tenth": Decimal("0.1"),
+    "one fifth": Decimal("0.2"),
+    "one quarter": Decimal("0.25"),
+    "three tenths": Decimal("0.3"),
+    "one third": Decimal(1) / Decimal(3),
+    "two fifths": Decimal("0.4"),
+    "one half": Decimal("0.5"),
+}
+_WORDED_THRESHOLD = re.compile(
+    r"(?:не\s+менее|not\s+less\s+than|at\s+least)\s+"
+    r"(?P<words>" + "|".join(sorted(_FRACTIONS, key=len, reverse=True)) + r")\s+"
+    r"(?:голосующих\s+прав|of\s+the\s+voting\s+rights|voting\s+rights)",
+    re.IGNORECASE,
+)
+
+# Досье без таблицы долей объявляет связанность прямо: либо называет контрагента, либо
+# сообщает, что связанных сторон нет. Второе — не пустой разбор, а прочитанный ответ,
+# и путать эти два случая нельзя: первый означает «считать не по чему».
+_NAMED_AFFILIATE = re.compile(
+    r"Контрагент\s*[«\"']?(?P<name>[^»\"'\n]+?)[»\"']?\s*классифицирован\s+как\s+"
+    r"(?P<designation>[А-ЯЁ][А-ЯЁ\s-]*[А-ЯЁ])"
+    r"|Counterparty\s*[«\"']?(?P<name_en>[^»\"'\n]+?)[»\"']?\s+is\s+(?:an?\s+)?"
+    r"(?:designated|classified\s+as)\s+(?:an?\s+)?(?P<designation_en>[A-Z][A-Z\s-]*[A-Z])",
+)
+# Досье называет связанной стороной не всякого, кого перечисляет. Дочерняя организация
+# внутри периметра — это структура группы, а не признак связанности для целей платежей;
+# связанность объявляется отдельным словом. Перечисленные, но не связанные всё равно
+# попадают в индекс: он тогда знает их написание и не примет за опечатку.
+_RELATED_DESIGNATIONS = ("АФФИЛИРОВАННОЕ", "СВЯЗАННОЕ", "AFFILIATE", "RELATED PARTY", "RELATED")
+_NO_RELATED_PARTIES = (
+    "Связанные стороны среди контрагентов не выявлены",
+    "No related parties were identified among the counterparties",
+    "No related parties identified among the counterparties",
+)
+
 _HOLDING = re.compile(r"^(?P<name>\S[^\n]*?)\s*\n\s*(?P<share>\d+(?:[.,]\d+)?)\s*%\s*$", re.M)
 # Из текстового слоя PDF таблица приходит двумя строками на контрагента, а из OCR —
 # строкой Markdown. Это одна и та же таблица, поэтому разбираем оба начертания:
@@ -126,20 +173,54 @@ def _read_holdings(block: str) -> tuple[tuple[str, Decimal], ...]:
     return ()
 
 
+def _threshold(text: str) -> Decimal | None:
+    if (match := _THRESHOLD.search(text)) is not None:
+        return _declared_share(match)
+    if (worded := _WORDED_THRESHOLD.search(text)) is not None:
+        return _FRACTIONS[worded.group("words").lower()]
+    return None
+
+
+def _named_designations(text: str) -> tuple[tuple[str, Decimal], ...]:
+    """Контрагенты, названные досье поимённо, вместе с их обозначением.
+
+    Доля здесь не объявлена и не нужна: досье сделало вывод само, а не дало основание
+    для него. Связанному ставится единица, чтобы он прошёл сравнение с порогом наравне
+    с теми, у кого доля известна; прочим — ноль, потому что перечисление в досье само
+    по себе связанности не означает.
+    """
+    found = []
+    for match in _NAMED_AFFILIATE.finditer(text):
+        name = match.group("name") or match.group("name_en")
+        designation = (match.group("designation") or match.group("designation_en") or "").upper()
+        if not name or not name.strip():
+            continue
+        related = any(word in designation for word in _RELATED_DESIGNATIONS)
+        found.append((name.strip(), Decimal(1) if related else Decimal(0)))
+    return tuple(found)
+
+
 def parse_related_party_policy(text: str) -> RelatedPartyPolicy:
-    match = _THRESHOLD.search(text)
-    if match is None:
-        raise KycError("В досье не объявлен порог доли для связанных сторон")
+    threshold = _threshold(text)
+    if threshold is not None:
+        block = _section(text, _TABLE_START, _TABLE_END)
+        if block is None:
+            raise KycError("В досье не нашлась таблица долей участия")
 
-    block = _section(text, _TABLE_START, _TABLE_END)
-    if block is None:
-        raise KycError("В досье не нашлась таблица долей участия")
+        holdings = _read_holdings(block)
+        if not holdings:
+            raise KycError("Таблица долей участия пуста")
 
-    holdings = _read_holdings(block)
-    if not holdings:
-        raise KycError("Таблица долей участия пуста")
+        return RelatedPartyPolicy(threshold=threshold, holdings=holdings)
 
-    return RelatedPartyPolicy(threshold=_declared_share(match), holdings=holdings)
+    # Досье без таблицы долей. Порога в нём нет, поэтому связанность объявлена готовым
+    # выводом, и порог ставится единицей — сравнивать по нему нечего.
+    if named := _named_designations(text):
+        return RelatedPartyPolicy(threshold=Decimal(1), holdings=named)
+    if any(marker in text for marker in _NO_RELATED_PARTIES):
+        return RelatedPartyPolicy(threshold=Decimal(1), holdings=())
+
+    raise KycError("В досье не объявлен ни порог доли, ни перечень связанных сторон")
 
 
 def parse_collateral_policy(text: str) -> CollateralPolicy:
