@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from functools import partial
@@ -51,8 +51,11 @@ from halyk.models.formula import (
     CovenantFormula,
     Difference,
     Direction,
+    FactValue,
     LedgerSum,
+    Ratio,
     Selector,
+    Sum,
 )
 from halyk.models.source import SourceAuthority
 
@@ -185,28 +188,109 @@ def _ebitda_is_disclosed(documents: Iterable[DocumentFacts]) -> bool:
     )
 
 
-def _expand_ebitda(value: Any) -> Any:
-    """Заменить узел EBITDA стандартным определением из статей реестра."""
+def _ebitda_node() -> Difference:
+    return Difference(
+        left=LedgerSum(
+            selector=Selector(categories=(TransactionCategory.REVENUE,), direction=Direction.INFLOW)
+        ),
+        right=LedgerSum(
+            selector=Selector(categories=(TransactionCategory.OPEX,), direction=Direction.OUTFLOW)
+        ),
+    )
+
+
+def _repayments_node() -> LedgerSum:
+    return LedgerSum(
+        selector=Selector(
+            categories=(TransactionCategory.PRINCIPAL_REPAYMENT,), direction=Direction.OUTFLOW
+        )
+    )
+
+
+def _debt_node() -> Difference:
+    """Долг за период: привлечённое финансирование за вычетом погашений тела.
+
+    Определение не наше: так его записывают сами договоры набора — «aggregate
+    principal amount of Financial Indebtedness drawn during the period less all
+    scheduled principal repayments made in that period». Часть договоров ссылается
+    на пункт с определением, которого в них нет, и без подстановки величина уходит
+    во внешние факты, где её никто не раскрывал.
+    """
+    return Difference(
+        left=LedgerSum(
+            selector=Selector(
+                categories=(TransactionCategory.FINANCING_INFLOW,), direction=Direction.INFLOW
+            )
+        ),
+        right=_repayments_node(),
+    )
+
+
+# Показатели, состав которых договор называет сам. Величина, собираемая из операций
+# реестра, внешним фактом быть не может: спрашивать её у документов бессмысленно, там
+# её нет и не должно быть.
+def _one_off_addback_node() -> FactValue:
+    """Разовые статьи, возвращаемые в EBITDA.
+
+    Это те самые статьи, которые примечания и отчёт аудитора уже перечислили: спрашивать
+    их сумму отдельной величиной незачем, она собирается из прочитанных фактов. Порог
+    существенности применяется здесь же — иначе в EBITDA вернётся всё упомянутое.
+    """
+    return FactValue(fact_kind="one_off_item", above_one_off_policy=True)
+
+
+def _group_capex_node() -> FactValue:
+    """Капитальные затраты Группы: поступления основных средств из консолидированной
+    отчётности. Отдельной проводки у них нет, величина выводится из движения."""
+    return FactValue(fact_kind="ppe_roll_forward")
+
+
+_STANDARD_DEFINITIONS: dict[str, Callable[[], Sum | Difference | Ratio | LedgerSum | FactValue]] = {
+    "ebitda": _ebitda_node,
+    "borrower_ebitda": _ebitda_node,
+    "total_debt": _debt_node,
+    "borrower_total_debt": _debt_node,
+    "net_debt": _debt_node,
+    "total_indebtedness": _debt_node,
+    "financial_indebtedness": _debt_node,
+    "scheduled_principal_repayments": _repayments_node,
+    "principal_repayments": _repayments_node,
+    "debt_to_ebitda_ratio": lambda: Ratio(numerator=_debt_node(), denominator=_ebitda_node()),
+    "leverage_ratio": lambda: Ratio(numerator=_debt_node(), denominator=_ebitda_node()),
+    "net_leverage_ratio": lambda: Ratio(numerator=_debt_node(), denominator=_ebitda_node()),
+    "ebitda_one_off_addback": _one_off_addback_node,
+    "ebitda_one_off_addbacks": _one_off_addback_node,
+    "one_off_ebitda_adjustment": _one_off_addback_node,
+    "one_off_ebitda_adjustments": _one_off_addback_node,
+    "auditor_agreed_one_off_ebitda_adjustment": _one_off_addback_node,
+    "auditor_agreed_one_off_ebitda_adjustments": _one_off_addback_node,
+    "auditor_agreed_one_off_adjustments": _one_off_addback_node,
+    "consolidated_capital_expenditures": _group_capex_node,
+    "group_consolidated_capex": _group_capex_node,
+    "group_capital_expenditures": _group_capex_node,
+}
+
+
+def _standard_for(kind: str) -> Callable[[], Any] | None:
+    """Стандартное определение величины по её имени, если оно у нас есть.
+
+    Только точное совпадение. Поиск по признакам («что-то про разовые статьи»)
+    пробовался и оказался вреднее пропуска: он перехватывал требования, которые
+    resolver закрывал сам, и подменял их пустой суммой.
+    """
+    return _STANDARD_DEFINITIONS.get(kind)
+
+
+def _expand_standard(value: Any, kinds: Collection[str]) -> Any:
+    """Заменить узлы названных величин их стандартным определением."""
     if isinstance(value, dict):
-        if value.get("op") == "fact_value" and str(value.get("fact_kind", "")).casefold() in {
-            "ebitda",
-            "borrower_ebitda",
-        }:
-            return Difference(
-                left=LedgerSum(
-                    selector=Selector(
-                        categories=(TransactionCategory.REVENUE,), direction=Direction.INFLOW
-                    )
-                ),
-                right=LedgerSum(
-                    selector=Selector(
-                        categories=(TransactionCategory.OPEX,), direction=Direction.OUTFLOW
-                    )
-                ),
-            ).model_dump(mode="python")
-        return {key: _expand_ebitda(item) for key, item in value.items()}
+        kind = str(value.get("fact_kind") or value.get("name") or "").casefold()
+        build = _standard_for(kind) if kind in kinds else None
+        if value.get("op") in ("fact_value", "external") and build is not None:
+            return build().model_dump(mode="python")
+        return {key: _expand_standard(item, kinds) for key, item in value.items()}
     if isinstance(value, list | tuple):
-        return type(value)(_expand_ebitda(item) for item in value)
+        return type(value)(_expand_standard(item, kinds) for item in value)
     return value
 
 
@@ -277,24 +361,35 @@ def _collapse_inline_ebitda(value: Any) -> Any:
 def normalise_derived_metrics(
     clauses: Sequence[CompiledClause], documents: Iterable[DocumentFacts]
 ) -> tuple[CompiledClause, ...]:
-    """Развернуть стандартную EBITDA, если готовое значение нигде не раскрыто."""
+    """Развернуть показатели, состав которых договор задаёт сам.
+
+    EBITDA разворачивается только когда готового значения нигде нет: раскрытое в
+    примечаниях считается более сильным источником, чем наша реконструкция. У
+    долговых величин такого источника не бывает — они по определению собираются из
+    движений периода, — поэтому они разворачиваются всегда.
+    """
+    skip = set()
     if _ebitda_is_disclosed(documents):
-        return tuple(clauses)
+        skip = {"ebitda", "borrower_ebitda"}
     found = []
     for clause in clauses:
         formula_payload = clause.formula.model_dump(mode="json")
-        if _EBITDA_WORD.search(f"{clause.formula.title} {clause.formula.quote}"):
+        if "ebitda" not in skip and _EBITDA_WORD.search(
+            f"{clause.formula.title} {clause.formula.quote}"
+        ):
             formula_payload = _collapse_inline_ebitda(formula_payload)
-        kinds = {item.fact_kind.casefold() for item in clause.required_facts}
-        if not kinds.intersection({"ebitda", "borrower_ebitda"}):
+        expandable = {
+            kind
+            for item in clause.required_facts
+            if (kind := item.fact_kind.casefold()) not in skip and _standard_for(kind) is not None
+        }
+        if not expandable:
             formula = CovenantFormula.model_validate(formula_payload)
             found.append(clause.model_copy(update={"formula": formula}))
             continue
-        formula = CovenantFormula.model_validate(_expand_ebitda(formula_payload))
+        formula = CovenantFormula.model_validate(_expand_standard(formula_payload, expandable))
         requirements = tuple(
-            item
-            for item in clause.required_facts
-            if item.fact_kind.casefold() not in {"ebitda", "borrower_ebitda"}
+            item for item in clause.required_facts if item.fact_kind.casefold() not in expandable
         )
         found.append(clause.model_copy(update={"formula": formula, "required_facts": requirements}))
     return tuple(found)
