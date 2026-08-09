@@ -8,7 +8,7 @@
 
 1. Убедиться, что Docker Desktop запущен только если планируется контейнерный путь.
 2. Проверить `.env`: `OPENAI_API_KEY`, `HALYK_TEAM`, `HALYK_CONTACT_EMAIL`.
-3. Оставить `HALYK_MAX_CONCURRENCY=4`, `HALYK_MAX_LIVE_CALLS=80`,
+3. Оставить `HALYK_MAX_CONCURRENCY=6`, `HALYK_MAX_LIVE_CALLS=80`,
    `HALYK_MAX_TOTAL_INPUT_TOKENS=2000000` и `HALYK_MAX_COST_USD=8`.
 4. Выполнить локальные проверки:
 
