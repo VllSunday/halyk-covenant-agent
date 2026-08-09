@@ -51,11 +51,30 @@ def test_document_kind_is_language_neutral(text: str, kind: DocumentKind) -> Non
 
 @pytest.mark.parametrize(
     "text",
-    ["НЕДЕЙСТВУЮЩАЯ РЕДАКЦИЯ (2024 г.)", "SUPERSEDED EDITION (2024)", "DOES NOT APPLY"],
+    ["НЕДЕЙСТВУЮЩАЯ РЕДАКЦИЯ (2024 г.)", "SUPERSEDED EDITION (2024)", "NOT OPERATIVE"],
 )
 def test_superseded_edition_is_language_neutral(text: str) -> None:
     marked = squeeze(f"ДОГОВОР БАНКОВСКОГО ЗАЙМА {text}")
     assert detect_status(marked, DocumentKind.LOAN_AGREEMENT) is DocumentStatus.SUPERSEDED
+
+
+@pytest.mark.parametrize(
+    "clause",
+    [
+        "пока коэффициент долговой нагрузки не превышает 3.00x, указанное "
+        "ограничение капитальных затрат не применяется",
+        "while the leverage ratio does not exceed 3.00x, the stated capital "
+        "expenditure limitation does not apply",
+    ],
+)
+def test_conditional_carve_out_does_not_supersede_agreement(clause: str) -> None:
+    """«Не применяется» относится к ковенанту, а не к редакции договора.
+
+    Приняв это за маркер вытеснения, разбор оставляет заёмщика вовсе без
+    действующего договора — и ошибка тихая: договор в наборе есть.
+    """
+    marked = squeeze(f"ДОГОВОР БАНКОВСКОГО ЗАЙМА Пункт 6.1. {clause}.")
+    assert detect_status(marked, DocumentKind.LOAN_AGREEMENT) is DocumentStatus.CURRENT
 
 
 @pytest.mark.parametrize(

@@ -71,3 +71,30 @@ def test_no_account() -> None:
 def test_report_number() -> None:
     assert detect_report_number("Номер заключения AR-2025-0634 выдан") == "AR-2025-0634"
     assert detect_report_number("без номера") is None
+
+
+def test_account_is_matched_against_ledger_not_by_prefix() -> None:
+    """Префикс счёта задаёт реестр, а не наше представление о его форме.
+
+    Заёмщик со счётом вида `TELE-4471` иначе остаётся без единого документа, а
+    номер отчёта `AR-2025` выигрывает у настоящего счёта по частоте упоминаний.
+    """
+    text = "ЗАЁМ № TELE-4471 ... досье AR-2025 ... AR-2025 ... TELE-4471 ... TELE-4471"
+    assert detect_account(text, {"TELE-4471", "ACC-7001"}) == "TELE-4471"
+    assert detect_account(text) is None
+
+
+def test_credit_agreement_counts_only_in_the_heading() -> None:
+    """Заголовок объявляет тип документа, ссылка в теле — нет."""
+    agreement = squeeze(
+        "HALYK BANK JSC CONFIDENTIAL · EXECUTION COPY · LOAN REFERENCE ACC-7604 "
+        "CREDIT AGREEMENT Senior Secured Credit Facility"
+    )
+    assert detect_kind(agreement) is DocumentKind.LOAN_AGREEMENT
+
+    notes = squeeze(
+        "Notes to the Financial Statements "
+        + "Note 1 — Basis of preparation. " * 20
+        + "prepared solely for covenant-testing purposes under the Credit Agreement."
+    )
+    assert detect_kind(notes) is DocumentKind.FINANCIAL_NOTES

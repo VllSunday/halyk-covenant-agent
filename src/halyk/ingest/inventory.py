@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
@@ -140,7 +140,15 @@ def _apply_ocr(source: Path, page: PageFacts, plan: OcrPlan, ocr: CachedOcr) -> 
     )
 
 
-def read_document(path: Path, ocr: CachedOcr | None = None) -> DocumentFacts:
+def read_document(
+    path: Path, ocr: CachedOcr | None = None, accounts: Collection[str] | None = None
+) -> DocumentFacts:
+    """Разбор одного документа.
+
+    Счета реестра передаются сюда потому, что принадлежность документа заёмщику
+    проверяется по ним, а не по форме идентификатора: префикс `ACC` — свойство
+    открытого набора, и заёмщик со счётом другого вида остался бы без документов.
+    """
     pages = []
     for parsed in pdf.read_pages(path):
         plan = plan_page(parsed)
@@ -157,7 +165,7 @@ def read_document(path: Path, ocr: CachedOcr | None = None) -> DocumentFacts:
         sha256=sha256_file(path),
         kind=kind,
         status=router.detect_status(squeezed, kind),
-        account_id=router.detect_account(text) if kind.is_relevant else None,
+        account_id=router.detect_account(text, accounts) if kind.is_relevant else None,
         report_number=router.detect_report_number(text),
         pages=tuple(pages),
     )
@@ -208,15 +216,21 @@ def build_inventory(
     ledger_path = find_ledger(files)
     ledger = read_ledger(ledger_path)
 
+    # Счета берём из реестра: он единственный источник, где они объявлены, а не
+    # угаданы по форме записи.
+    accounts = frozenset(row.account_id for row in ledger if row.account_id)
+
     pdf_paths = [path for path in files if path.suffix.lower() == ".pdf"]
     workers = max(1, max_concurrency)
     if workers == 1:
-        documents = [read_document(path, ocr) for path in pdf_paths]
+        documents = [read_document(path, ocr, accounts) for path in pdf_paths]
     else:
         # map сохраняет порядок входных путей: параллельность не должна менять
         # перепись, её хеши и последующий Submission.json.
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="halyk-pdf") as pool:
-            documents = list(pool.map(partial(read_document, ocr=ocr), pdf_paths))
+            documents = list(
+                pool.map(partial(read_document, ocr=ocr, accounts=accounts), pdf_paths)
+            )
     skipped = tuple(p.name for p in files if p.suffix.lower() != ".pdf")
     documents = _link_by_organisation(documents)
 
