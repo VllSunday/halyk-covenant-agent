@@ -76,7 +76,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         "contra-marketing",
-        TransactionCategory.OTHER,
+        TransactionCategory.MARKETING,
         rf"(marketing|ad campaign|media).*{_CONTRA}",
         Direction.INFLOW,
     ),
@@ -100,6 +100,17 @@ RULES: tuple[Rule, ...] = (
         r"(loan (drawdown|proceeds|advance)|facility drawdown|bridge (loan|facility)"
         r"|note issue|financing proceeds|credit line drawdown|subordinated (loan|notes) received)",
         Direction.INFLOW,
+    ),
+    # Погашение тела долга. Проверяется раньше процентов: строка «term loan principal
+    # repayment» — это возврат основной суммы, а не её обслуживание, и долговая
+    # нагрузка считается как привлечённое финансирование за вычетом таких погашений.
+    _rule(
+        "principal-repayment",
+        TransactionCategory.PRINCIPAL_REPAYMENT,
+        r"principal repayment|repayment of principal|(loan|facility|debt) principal"
+        r"|principal (instalment|installment|amortisation|amortization)"
+        r"|scheduled repayment of",
+        Direction.OUTFLOW,
     ),
     # Расходные статьи.
     _rule(
@@ -154,9 +165,15 @@ RULES: tuple[Rule, ...] = (
     # входит. Проверяется раньше, чем сами операционные расходы: «outdoor marketing
     # site hire» и «marketing translation» не должны попасть в них по слову рядом.
     _rule(
+        "marketing",
+        TransactionCategory.MARKETING,
+        r"marketing|ad campaign|advertis|sponsor|exhibition|brand|newsletter|media buy|"
+        r"media schedule|promotional",
+        Direction.OUTFLOW,
+    ),
+    _rule(
         "administrative",
         TransactionCategory.OTHER,
-        r"marketing|ad campaign|advertis|sponsor|exhibition|brand|newsletter|media buy|"
         r"advisory|consult|retainer|audit fee|legal",
         Direction.OUTFLOW,
     ),

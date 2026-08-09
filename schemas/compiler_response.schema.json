@@ -1569,6 +1569,8 @@
         "interest_expense",
         "insurance_premium",
         "financing_inflow",
+        "principal_repayment",
+        "marketing",
         "other",
         "unknown"
       ],

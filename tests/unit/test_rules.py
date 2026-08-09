@@ -54,7 +54,7 @@ def test_inflows_are_recognised(description: str, expected: C) -> None:
         ("Group insurance experience refund", C.INSURANCE_PREMIUM),
         ("Payroll overfunding returned", C.PAYROLL),
         ("Telecom service credit received", C.UTILITIES),
-        ("Marketing overbilling refund", C.OTHER),
+        ("Marketing overbilling refund", C.MARKETING),
     ],
 )
 def test_returns_keep_the_article_of_the_original_expense(description: str, expected: C) -> None:
@@ -73,23 +73,24 @@ def test_the_same_word_gives_different_articles_by_direction() -> None:
 
 
 @pytest.mark.parametrize(
-    "description",
+    ("description", "expected"),
     [
-        "Customer newsletter marketing production",
-        "Management advisory retainer",
-        "Outdoor marketing site hire",
-        "Industry exhibition stand marketing",
-        "Statutory audit fee 2025",
+        ("Customer newsletter marketing production", C.MARKETING),
+        ("Management advisory retainer", C.OTHER),
+        ("Outdoor marketing site hire", C.MARKETING),
+        ("Industry exhibition stand marketing", C.MARKETING),
+        ("Statutory audit fee 2025", C.OTHER),
     ],
 )
-def test_administrative_costs_are_not_operating_expenses(description: str) -> None:
+def test_administrative_costs_are_not_operating_expenses(description: str, expected: C) -> None:
     """Строка «операционные расходы» договора — про эксплуатацию объекта.
 
     Маркетинг, реклама и консультации операционные по смыслу, но в эту строку
     отчётности не входят: у B1 она состоит из одной проводки на шесть миллионов, а
-    рекламы там на двадцать.
+    рекламы там на двадцать. Маркетинг при этом держится отдельной статьёй: его
+    потолок ковенанты задают прямо, и внутри «прочего» такую величину не выразить.
     """
-    assert category(description, -100_00) is C.OTHER
+    assert category(description, -100_00) is expected
 
 
 def test_unknown_description_is_left_to_the_model() -> None:

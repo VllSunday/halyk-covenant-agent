@@ -29,6 +29,13 @@ class TransactionCategory(StrEnum):
     INTEREST_EXPENSE = "interest_expense"
     INSURANCE_PREMIUM = "insurance_premium"
     FINANCING_INFLOW = "financing_inflow"
+    # Обе статьи названы ковенантами прямо: долговая нагрузка считается как привлечённое
+    # финансирование за вычетом плановых погашений, а потолок маркетинга сравнивается с
+    # самими маркетинговыми расходами. Пока они попадали в `other`, величину нельзя было
+    # выразить деревом, и компилятор уходил спрашивать её у resolver — а в документах её
+    # нет, она в реестре.
+    PRINCIPAL_REPAYMENT = "principal_repayment"
+    MARKETING = "marketing"
     OTHER = "other"
     UNKNOWN = "unknown"
 
